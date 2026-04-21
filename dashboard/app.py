@@ -36,24 +36,35 @@ def size_sort_key(size):
         return 999
 
 
-def size_action(return_rate, p75, pct_small, pct_large, pct_quality, is_flagged):
+def size_action(return_rate, p75, pct_small, pct_large, pct_quality, pct_other, is_flagged):
+    """
+    Two separate axes:
+    1. Sizing: compare too small vs too large. If one is 3x+ the other, it's clear direction.
+    2. Quality/other: evaluated independently from sizing.
+    """
     if not is_flagged:
         return ""
-    if pct_small >= 0.75:
-        return "Runs small. Consider sizing up or adding 'order one size up' guidance."
-    if pct_large >= 0.75:
-        return "Runs large. Consider sizing down or adding 'order one size down' guidance."
-    if pct_quality >= 0.75:
-        return "Quality/expectation issue. Review product photos, description, and fabric quality."
-    parts = []
-    if pct_small >= 0.2:
-        parts.append(f"{pct_small:.0%} too small")
-    if pct_large >= 0.2:
-        parts.append(f"{pct_large:.0%} too large")
-    if pct_quality >= 0.2:
-        parts.append(f"{pct_quality:.0%} quality")
-    if parts:
-        return f"Mixed feedback ({', '.join(parts)}). Review sizing consistency."
+
+    issues = []
+
+    # --- Sizing axis ---
+    sizing_total = pct_small + pct_large
+    if sizing_total > 0.1:
+        if pct_small > 0 and (pct_large == 0 or pct_small / max(pct_large, 0.01) >= 3):
+            issues.append(f"Runs small ({pct_small:.0%}). Size up or add 'order one size up'.")
+        elif pct_large > 0 and (pct_small == 0 or pct_large / max(pct_small, 0.01) >= 3):
+            issues.append(f"Runs large ({pct_large:.0%}). Size down or add 'order one size down'.")
+        elif pct_small >= 0.15 and pct_large >= 0.15:
+            issues.append(f"Inconsistent sizing ({pct_small:.0%} small, {pct_large:.0%} large). Review size chart.")
+
+    # --- Quality/other axis (independent) ---
+    if pct_quality >= 0.25:
+        issues.append(f"Quality/expectation issue ({pct_quality:.0%}). Review photos, description, fabric.")
+    if pct_other >= 0.40 and sizing_total < 0.2:
+        issues.append(f"High 'other' returns ({pct_other:.0%}). Check customer reviews.")
+
+    if issues:
+        return " | ".join(issues)
     return f"Above P75 ({p75:.0%}). Investigate."
 
 
@@ -215,6 +226,7 @@ else:
                                     s.get("pct_too_small", 0),
                                     s.get("pct_too_large", 0),
                                     s.get("pct_quality", 0),
+                                    s.get("pct_other", 0),
                                     s.get("is_problematic", False),
                                 ),
                                 axis=1,
