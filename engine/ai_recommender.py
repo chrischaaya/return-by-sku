@@ -21,15 +21,18 @@ def _get_client() -> Optional[Anthropic]:
 
 
 def _build_sku_prompt(row: dict, size_data: list) -> str:
-    """Build a compact prompt with all the SKU's data."""
-    size_table = "Size | Sold | Return Rate | % Too Small | % Too Large | % Quality | % Other | Flagged\n"
-    size_table += "---|---|---|---|---|---|---|---\n"
-    for s in size_data:
+    """Build a compact prompt with only problematic sizes."""
+    flagged = [s for s in size_data if s.get("is_problematic")]
+    if not flagged:
+        return ""
+
+    size_table = "Size | Sold | Return Rate | % Too Small | % Too Large | % Quality | % Other\n"
+    size_table += "---|---|---|---|---|---|---\n"
+    for s in flagged:
         size_table += (
             f"{s['size']} | {s['sold']} | {s['return_rate']:.1%} | "
             f"{s.get('pct_too_small', 0):.0%} | {s.get('pct_too_large', 0):.0%} | "
-            f"{s.get('pct_quality', 0):.0%} | {s.get('pct_other', 0):.0%} | "
-            f"{'YES' if s.get('is_problematic') else ''}\n"
+            f"{s.get('pct_quality', 0):.0%} | {s.get('pct_other', 0):.0%}\n"
         )
 
     return f"""You are an operations analyst for a fashion e-commerce company. Analyze this SKU's return data and give a specific, actionable recommendation.
@@ -42,16 +45,16 @@ def _build_sku_prompt(row: dict, size_data: list) -> str:
 **Overall return rate:** {row.get('return_rate', 0):.1%}
 **All-time sold:** {row.get('total_sold', 0):,}
 
-**Size breakdown:**
+**Problematic sizes (above category P75):**
 {size_table}
 
 Return reason definitions:
-- Too Small / Too Large = customer says the product doesn't fit (sizing issue)
-- Quality = product is defective, damaged, or doesn't match listing photos/description
-- Other = no longer wanted, ordered multiple sizes, delivery issues, etc.
+- Too Small / Too Large = sizing issue
+- Quality = defective, damaged, or doesn't match listing
+- Other = no longer wanted, ordered multiple sizes, delivery issues
 
 Rules:
-- Only flag sizes marked "YES" in the Flagged column
+- All sizes shown are problematic — focus on what's wrong and what to do
 - Analyze sizing (small vs large) separately from quality issues
 - If too_small dominates too_large (3x+ ratio), it clearly runs small — don't call it mixed
 - Same logic for too_large dominating too_small
@@ -64,6 +67,8 @@ Rules:
 def _haiku_recommend(client: Anthropic, row: dict, size_data: list) -> str:
     """Stage 1: Haiku drafts a recommendation."""
     prompt = _build_sku_prompt(row, size_data)
+    if not prompt:
+        return ""
     try:
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
