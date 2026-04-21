@@ -74,18 +74,15 @@ h1, h2, h3 = st.columns([4, 1, 1])
 with h1:
     st.title("Return Investigation Tool")
 with h2:
-    lang = st.radio("", ["🇬🇧 EN", "🇹🇷 TR"], horizontal=True, label_visibility="collapsed")
-with h3:
     should_update = st.button("Update Data", use_container_width=True)
-
-if "TR" in lang:
-    st.caption("💡 To translate: right-click anywhere on the page → 'Translate to Turkish' (Chrome/Edge)")
+with h3:
+    should_gen_ai = st.button("Generate AI Recs", use_container_width=True)
 
 # --- Load / refresh data ---
 if should_update or "data" not in st.session_state:
     with st.spinner("Loading data from MongoDB..."):
         st.session_state["data"] = load_data()
-        st.session_state["ai_recs_ready"] = False  # flag to regenerate AI recs
+        st.session_state.pop("ai_recs", None)
     st.toast("Data loaded!")
 
 data = st.session_state.get("data")
@@ -134,12 +131,12 @@ if df_sku_size is not None and not df_sku_size.empty:
     df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
     df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
 
-# --- Generate AI recommendations (only after Update Data, cached otherwise) ---
-if not st.session_state.get("ai_recs_ready", True):
-    with st.spinner("Generating AI recommendations..."):
+# --- Generate AI recommendations (only on button click) ---
+if should_gen_ai:
+    with st.spinner("Generating AI recommendations... (~20 seconds)"):
         ai_recs = generate_all_recommendations(df_sku, df_sku_size)
         st.session_state["ai_recs"] = ai_recs
-        st.session_state["ai_recs_ready"] = True
+    st.toast("AI recommendations generated!")
 
 # --- Split into bestsellers vs rising stars (mutually exclusive) ---
 all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
