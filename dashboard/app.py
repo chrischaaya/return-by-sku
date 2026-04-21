@@ -83,9 +83,9 @@ if "TR" in lang:
 
 # --- Load / refresh data ---
 if should_update or "data" not in st.session_state:
-    with st.spinner("Loading data from MongoDB... (this may take a minute)"):
+    with st.spinner("Loading data from MongoDB..."):
         st.session_state["data"] = load_data()
-        st.session_state["ai_recs"] = None  # reset so we regenerate after P75
+        st.session_state["ai_recs_ready"] = False  # flag to regenerate AI recs
     st.toast("Data loaded!")
 
 data = st.session_state.get("data")
@@ -134,11 +134,12 @@ if df_sku_size is not None and not df_sku_size.empty:
     df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
     df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
 
-# --- Generate AI recommendations (after P75 flagging) ---
-if st.session_state.get("ai_recs") is None:
+# --- Generate AI recommendations (only after Update Data, cached otherwise) ---
+if not st.session_state.get("ai_recs_ready", True):
     with st.spinner("Generating AI recommendations..."):
         ai_recs = generate_all_recommendations(df_sku, df_sku_size)
         st.session_state["ai_recs"] = ai_recs
+        st.session_state["ai_recs_ready"] = True
 
 # --- Split into bestsellers vs rising stars (mutually exclusive) ---
 all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
