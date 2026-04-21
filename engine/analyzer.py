@@ -402,8 +402,8 @@ def _add_trend_data(
     # for both periods (not perfect but avoids 2 more queries)
     # rate_recent = returned_recent / recent_sold
     # rate_prev = returned_prev / recent_sold (same denominator as proxy)
-    df_sku["rate_recent"] = None
-    df_sku["rate_prev"] = None
+    df_sku["rate_recent"] = float("nan")
+    df_sku["rate_prev"] = float("nan")
     df_sku["trend"] = 0.0
     df_sku["is_recovering"] = False
 
@@ -412,18 +412,17 @@ def _add_trend_data(
     top_skus = df_sku.loc[top_mask].nlargest(config.TOP_SKU_FOR_TRENDS, "recent_sold").index
 
     mask = df_sku.index.isin(top_skus)
-    recent_sold = df_sku.loc[mask, "recent_sold"].replace(0, 1)
-    df_sku.loc[mask, "rate_recent"] = (df_sku.loc[mask, "returned_recent"] / recent_sold).clip(upper=1.0)
-    df_sku.loc[mask, "rate_prev"] = (df_sku.loc[mask, "returned_prev"] / recent_sold).clip(upper=1.0)
-    df_sku.loc[mask, "trend"] = (
-        df_sku.loc[mask, "rate_recent"].fillna(0) - df_sku.loc[mask, "rate_prev"].fillna(0)
-    )
-
-    # Recovering: return rate dropped by > 5pp AND had meaningful prev returns
-    df_sku.loc[mask, "is_recovering"] = (
-        (df_sku.loc[mask, "trend"] < -0.05)
-        & (df_sku.loc[mask, "returned_prev"] >= 3)
-    )
+    if mask.any():
+        recent_sold = df_sku.loc[mask, "recent_sold"].replace(0, 1).astype(float)
+        rate_recent = (df_sku.loc[mask, "returned_recent"].astype(float) / recent_sold).clip(upper=1.0)
+        rate_prev = (df_sku.loc[mask, "returned_prev"].astype(float) / recent_sold).clip(upper=1.0)
+        df_sku.loc[mask, "rate_recent"] = rate_recent.values
+        df_sku.loc[mask, "rate_prev"] = rate_prev.values
+        df_sku.loc[mask, "trend"] = (rate_recent.fillna(0) - rate_prev.fillna(0)).values
+        df_sku.loc[mask, "is_recovering"] = (
+            (df_sku.loc[mask, "trend"] < -0.05)
+            & (df_sku.loc[mask, "returned_prev"] >= 3)
+        )
 
     return df_sku
 
