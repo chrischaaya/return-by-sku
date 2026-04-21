@@ -11,7 +11,7 @@ import streamlit as st
 import pandas as pd
 
 st.set_page_config(
-    page_title="Return Rate Dashboard",
+    page_title="Return Investigation Tool",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -70,11 +70,46 @@ def size_action(return_rate, p75, pct_small, pct_large, pct_quality, pct_other, 
 
 
 # --- Header ---
-header_left, header_right = st.columns([4, 1])
-with header_left:
-    st.title("Return Rate Dashboard")
-with header_right:
+h1, h2, h3 = st.columns([4, 1, 1])
+with h1:
+    st.title("Return Investigation Tool")
+with h2:
+    lang = st.radio("", ["🇬🇧", "🇹🇷"], horizontal=True, label_visibility="collapsed")
+with h3:
     should_update = st.button("Update Data", use_container_width=True)
+
+# Turkish: inject Google Translate auto-translate via meta tag
+if lang == "🇹🇷":
+    st.components.v1.html("""
+        <script>
+        // Set the lang attribute to trigger browser translation
+        document.documentElement.lang = 'tr';
+        // For Chrome auto-translate
+        var meta = document.createElement('meta');
+        meta.httpEquiv = 'Content-Language';
+        meta.content = 'tr';
+        document.head.appendChild(meta);
+        </script>
+        <style>
+        .google-translate-element { display: none; }
+        </style>
+        <div id="google_translate_element"></div>
+        <script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
+        <script>
+        function googleTranslateElementInit() {
+            new google.translate.TranslateElement({
+                pageLanguage: 'en',
+                autoDisplay: false,
+                includedLanguages: 'tr'
+            }, 'google_translate_element');
+            // Auto-click translate
+            setTimeout(function() {
+                var sel = document.querySelector('.goog-te-combo');
+                if (sel) { sel.value = 'tr'; sel.dispatchEvent(new Event('change')); }
+            }, 1000);
+        }
+        </script>
+    """, height=0)
 
 # --- Load / refresh data ---
 if should_update or "data" not in st.session_state:
