@@ -74,53 +74,19 @@ h1, h2, h3 = st.columns([4, 1, 1])
 with h1:
     st.title("Return Investigation Tool")
 with h2:
-    lang = st.radio("", ["🇬🇧", "🇹🇷"], horizontal=True, label_visibility="collapsed")
+    lang = st.radio("", ["🇬🇧 EN", "🇹🇷 TR"], horizontal=True, label_visibility="collapsed")
 with h3:
     should_update = st.button("Update Data", use_container_width=True)
 
-# Turkish: inject Google Translate auto-translate via meta tag
-if lang == "🇹🇷":
-    st.components.v1.html("""
-        <script>
-        // Set the lang attribute to trigger browser translation
-        document.documentElement.lang = 'tr';
-        // For Chrome auto-translate
-        var meta = document.createElement('meta');
-        meta.httpEquiv = 'Content-Language';
-        meta.content = 'tr';
-        document.head.appendChild(meta);
-        </script>
-        <style>
-        .google-translate-element { display: none; }
-        </style>
-        <div id="google_translate_element"></div>
-        <script src="//translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
-        <script>
-        function googleTranslateElementInit() {
-            new google.translate.TranslateElement({
-                pageLanguage: 'en',
-                autoDisplay: false,
-                includedLanguages: 'tr'
-            }, 'google_translate_element');
-            // Auto-click translate
-            setTimeout(function() {
-                var sel = document.querySelector('.goog-te-combo');
-                if (sel) { sel.value = 'tr'; sel.dispatchEvent(new Event('change')); }
-            }, 1000);
-        }
-        </script>
-    """, height=0)
+if "TR" in lang:
+    st.caption("💡 To translate: right-click anywhere on the page → 'Translate to Turkish' (Chrome/Edge)")
 
 # --- Load / refresh data ---
 if should_update or "data" not in st.session_state:
     with st.spinner("Loading data from MongoDB... (this may take a minute)"):
         st.session_state["data"] = load_data()
-    # Generate AI recommendations for flagged SKUs
-    data = st.session_state["data"]
-    with st.spinner("Generating AI recommendations..."):
-        ai_recs = generate_all_recommendations(data["df_sku"], data["df_sku_size"])
-        st.session_state["ai_recs"] = ai_recs
-    st.toast("Data updated!")
+        st.session_state["ai_recs"] = None  # reset so we regenerate after P75
+    st.toast("Data loaded!")
 
 data = st.session_state.get("data")
 
@@ -167,6 +133,12 @@ if df_sku_size is not None and not df_sku_size.empty:
     df_sku = df_sku.drop(columns=["problematic_sizes"], errors="ignore")
     df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
     df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
+
+# --- Generate AI recommendations (after P75 flagging) ---
+if st.session_state.get("ai_recs") is None:
+    with st.spinner("Generating AI recommendations..."):
+        ai_recs = generate_all_recommendations(df_sku, df_sku_size)
+        st.session_state["ai_recs"] = ai_recs
 
 # --- Split into bestsellers vs rising stars (mutually exclusive) ---
 all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
