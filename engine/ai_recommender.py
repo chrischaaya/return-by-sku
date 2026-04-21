@@ -76,18 +76,27 @@ Return ONLY a JSON object where keys are SKU codes and values are recommendation
 
     try:
         response = client.messages.create(
-            model="claude-opus-4-6",
+            model="claude-sonnet-4-6",
             max_tokens=16000,
+            timeout=120,
             messages=[{"role": "user", "content": prompt}],
         )
         text = response.content[0].text.strip()
+        # Strip markdown code fences if present
         if text.startswith("```"):
-            text = text.split("```")[1]
-            if text.startswith("json"):
-                text = text[4:]
+            lines = text.split("\n")
+            lines = [l for l in lines if not l.strip().startswith("```")]
+            text = "\n".join(lines)
         return json.loads(text)
-    except Exception as e:
-        # Fallback if Opus fails
+    except json.JSONDecodeError:
+        # Try to extract JSON from partial response
+        try:
+            start = text.index("{")
+            end = text.rindex("}") + 1
+            return json.loads(text[start:end])
+        except Exception:
+            return _generate_all_fallback(df_sku, df_sku_size)
+    except Exception:
         return _generate_all_fallback(df_sku, df_sku_size)
 
 
