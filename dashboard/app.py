@@ -19,6 +19,7 @@ st.set_page_config(
 
 import config
 from engine.analyzer import load_data
+from engine.ai_recommender import generate_all_recommendations
 
 # --- Size ordering ---
 SIZE_ORDER = [
@@ -79,6 +80,11 @@ with header_right:
 if should_update or "data" not in st.session_state:
     with st.spinner("Loading data from MongoDB... (this may take a minute)"):
         st.session_state["data"] = load_data()
+    # Generate AI recommendations for flagged SKUs
+    data = st.session_state["data"]
+    with st.spinner("Generating AI recommendations..."):
+        ai_recs = generate_all_recommendations(data["df_sku"], data["df_sku_size"])
+        st.session_state["ai_recs"] = ai_recs
     st.toast("Data updated!")
 
 data = st.session_state.get("data")
@@ -257,3 +263,9 @@ else:
 
                             styled = size_display.style.apply(highlight_problems, axis=1)
                             st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                        # AI recommendation
+                        ai_recs = st.session_state.get("ai_recs", {})
+                        rec = ai_recs.get(row["sku_prefix"], "")
+                        if rec:
+                            st.markdown(f"**Recommendation:** {rec}")
