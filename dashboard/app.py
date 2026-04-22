@@ -190,10 +190,11 @@ fixed_data = get_skus_by_status("fixed")
 parked_data = get_skus_by_status("no_action")
 
 # --- Tabs ---
-tab_attention, tab_progress, tab_results = st.tabs([
+tab_attention, tab_progress, tab_results, tab_parked = st.tabs([
     f"Needs Attention ({len(needs_attention)})",
     f"In Progress ({len(waiting_data)})",
     f"Results ({len(fixed_data)})",
+    f"Parked ({len(parked_data)})",
 ])
 
 
@@ -555,21 +556,34 @@ with tab_results:
                 if st.button("✓ Dismiss — issue resolved", key=f"dis_{sku}", use_container_width=False):
                     dismiss_sku(sku)
                     st.session_state.pop("computed", None)
+                    st.toast(f"Dismissed {sku}")
                     st.rerun()
 
             st.markdown("")
 
-# --- Parked (small section at bottom) ---
-if parked_data:
-    with st.expander(f"Parked — no action possible ({len(parked_data)} products)", expanded=False):
+# =====================================================================
+# TAB 4: PARKED
+# =====================================================================
+with tab_parked:
+    if not parked_data:
+        st.info("No parked products.")
+    else:
+        st.caption(f"{len(parked_data)} products marked as 'no action possible'")
         for sku in parked_data:
             sku_row = df_sku[df_sku["sku_prefix"] == sku]
             name = sku_row.iloc[0]["product_name"] if not sku_row.empty else sku
-            c1, c2 = st.columns([5, 1])
-            with c1:
-                st.markdown(f"**{sku}** — {name}")
-            with c2:
-                if st.button("Revert", key=f"rvn_{sku}"):
+            img_url = sku_row.iloc[0].get("image_url") if not sku_row.empty else None
+            has_img = img_url and isinstance(img_url, str) and img_url.startswith("http")
+
+            col_img, col_main, col_btn = st.columns([1, 8, 2])
+            with col_img:
+                if has_img:
+                    st.image(img_url, width=55)
+            with col_main:
+                st.markdown(f"**{name}**")
+                st.caption(f"{sku}")
+            with col_btn:
+                if st.button("↩ Revert", key=f"rvn_{sku}", use_container_width=True):
                     revert_no_action(sku)
                     st.session_state.pop("computed", None)
                     st.rerun()
