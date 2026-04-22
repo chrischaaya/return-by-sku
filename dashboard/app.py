@@ -135,12 +135,18 @@ if st.session_state.get("show_settings"):
                 "Min sales for reason data", 1, 100, int(s["min_size_volume"]),
                 help="Minimum all-time sales to show return reason breakdown.",
             )
-            excluded_str = st.text_input(
+            all_channels = [
+                "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
+                "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
+                "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
+                "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
+            ]
+            s["excluded_channels"] = st.multiselect(
                 "Excluded channels",
-                value=", ".join(s["excluded_channels"]),
-                help="Comma-separated channel keys to exclude.",
+                options=all_channels,
+                default=s["excluded_channels"],
+                help="Channels to exclude from all analysis.",
             )
-            s["excluded_channels"] = [c.strip() for c in excluded_str.split(",") if c.strip()]
 
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
@@ -342,7 +348,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
             st.caption(f"{sku} · {row.get('supplier_name', 'N/A')} · {row.get('category_l3', '')}")
             st.markdown(
                 f'<div class="problem-box">'
-                f'Return rate: <b>{rate:.1%}</b> · Category avg (P{int(config.BASELINE_PERCENTILE*100)}): {baseline:.1%} · '
+                f'Return rate: <b>{rate:.1%}</b> · Category avg: {baseline:.1%} · '
                 f'<span class="sizes-affected">{n_prob} size{"s" if n_prob != 1 else ""} affected</span>'
                 f'</div>',
                 unsafe_allow_html=True,
