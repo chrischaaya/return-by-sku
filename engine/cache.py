@@ -91,7 +91,10 @@ def get_cache_age() -> str:
     meta = coll.find_one({"_id": "meta"}, {"updatedOn": 1})
     if not meta or "updatedOn" not in meta:
         return "never"
-    delta = datetime.now(timezone.utc) - meta["updatedOn"]
+    updated = meta["updatedOn"]
+    if updated.tzinfo is None:
+        updated = updated.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - updated
     hours = delta.total_seconds() / 3600
     if hours < 1:
         return f"{int(delta.total_seconds() / 60)} min ago"
