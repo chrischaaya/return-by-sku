@@ -210,28 +210,30 @@ def render_size_table(sku_prefix, is_rising=False):
         "parkpalet_stock", "action", "has_enough_reasons"
     ]].copy()
 
-    size_display["return_rate"] = size_display["return_rate"].apply(lambda x: f"{x:.1%}")
-    for col in ["pct_too_small", "pct_too_large", "pct_quality", "pct_other"]:
-        size_display[col] = size_display.apply(
-            lambda r: f"{r[col]:.0%}" if r["has_enough_reasons"] and r[col] > 0 else "—", axis=1
-        )
-    size_display = size_display.drop(columns=["has_enough_reasons"])
-    size_display.columns = [
-        "Size", "Eligible Sales", "Return Rate",
-        "% Too Small", "% Too Large", "% Quality", "% Other",
-        "Stock", "Action"
-    ]
+    # Compute total row
+    total_sold = sku_sizes["sold"].sum()
+    total_returned = sku_sizes.get("returned", pd.Series([0])).sum()
+    total_rate = total_returned / total_sold if total_sold > 0 else 0
+    total_stock = sku_sizes["parkpalet_stock"].sum()
+    total_reason_count = sku_sizes["reason_count"].sum()
+    has_enough_total = total_reason_count >= min_reasons
 
-    def highlight_problems(row_df):
-        idx = list(size_display.index).index(row_df.name)
-        if idx < len(is_prob) and is_prob[idx]:
-            return ["background-color: #ffcccc"] * len(row_df)
-        return [""] * len(row_df)
+    # Compute total reason pcts from raw counts
+    if has_enough_total and total_reason_count > 0:
+        # Weight by each size's reason count
+        rc = sku_sizes["reason_count"]
+        total_rc = rc.sum()
+        if total_rc > 0:
+            t_small = (sku_sizes["pct_too_small"] * rc).sum() / total_rc
+            t_large = (sku_sizes["pct_too_large"] * rc).sum() / total_rc
+            t_quality = (sku_sizes["pct_quality"] * rc).sum() / total_rc
+            t_other = (sku_sizes["pct_other"] * rc).sum() / total_rc
+        else:
+            t_small = t_large = t_quality = t_other = 0
+    else:
+        t_small = t_large = t_quality = t_other = 0
 
-    styled = size_display.style.apply(highlight_problems, axis=1)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
-
-    # SKU summary
+    # Generate total-level action (SKU summary)
     _prob_col = problematic_col if problematic_col in sku_sizes.columns else "is_problematic"
     all_size_data = sku_sizes.apply(
         lambda s: {
@@ -244,10 +246,50 @@ def render_size_table(sku_prefix, is_rising=False):
         },
         axis=1,
     ).tolist()
+    total_action = sku_summary(all_size_data)
+    if not total_action and not has_enough_total:
+        total_action = "High return rate. Not enough return reason data to diagnose."
 
-    summary_text = sku_summary(all_size_data)
-    if summary_text:
-        st.markdown(f"**Summary:** {summary_text}")
+    # Format size rows
+    size_display["return_rate"] = size_display["return_rate"].apply(lambda x: f"{x:.1%}")
+    for col in ["pct_too_small", "pct_too_large", "pct_quality", "pct_other"]:
+        size_display[col] = size_display.apply(
+            lambda r: f"{r[col]:.0%}" if r["has_enough_reasons"] and r[col] > 0 else "—", axis=1
+        )
+    size_display = size_display.drop(columns=["has_enough_reasons"])
+    size_display.columns = [
+        "Size", "Eligible Sales", "Return Rate",
+        "% Too Small", "% Too Large", "% Quality", "% Other",
+        "Stock", "Action"
+    ]
+
+    # Append total row
+    total_row = pd.DataFrame([{
+        "Size": "TOTAL",
+        "Eligible Sales": total_sold,
+        "Return Rate": f"{total_rate:.1%}",
+        "% Too Small": f"{t_small:.0%}" if has_enough_total and t_small > 0 else "—",
+        "% Too Large": f"{t_large:.0%}" if has_enough_total and t_large > 0 else "—",
+        "% Quality": f"{t_quality:.0%}" if has_enough_total and t_quality > 0 else "—",
+        "% Other": f"{t_other:.0%}" if has_enough_total and t_other > 0 else "—",
+        "Stock": total_stock,
+        "Action": total_action,
+    }])
+    size_display = pd.concat([size_display, total_row], ignore_index=True)
+
+    # Mark problematic rows + bold total row
+    is_prob_extended = list(is_prob) + [False]
+
+    def highlight_rows(row_df):
+        idx = list(size_display.index).index(row_df.name)
+        if idx == len(size_display) - 1:  # Total row
+            return ["font-weight: bold; background-color: #f0f0f0"] * len(row_df)
+        if idx < len(is_prob_extended) and is_prob_extended[idx]:
+            return ["background-color: #ffcccc"] * len(row_df)
+        return [""] * len(row_df)
+
+    styled = size_display.style.apply(highlight_rows, axis=1)
+    st.dataframe(styled, use_container_width=True, hide_index=True)
 
 
 def render_sku_list(display, is_rising=False, cta_mode="action"):
