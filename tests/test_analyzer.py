@@ -53,15 +53,15 @@ class TestSizeAction:
 
     def test_flagged_low_reason_count(self):
         result = size_action(0.30, 0.20, 0.5, 0.1, 0.1, 0.3, True, 100, 50, 5, 10)
-        assert "Not enough return reason data" in result
+        assert "Not enough data to diagnose" in result
 
-    def test_runs_small_detected(self):
+    def test_too_small_detected(self):
         result = size_action(0.30, 0.20, 0.8, 0.0, 0.1, 0.1, True, 100, 50, 20, 10)
-        assert "Runs small" in result
+        assert "Too small" in result
 
-    def test_runs_large_detected(self):
+    def test_too_large_detected(self):
         result = size_action(0.30, 0.20, 0.0, 0.8, 0.1, 0.1, True, 100, 50, 20, 10)
-        assert "Runs large" in result
+        assert "Too large" in result
 
     def test_quality_issue_detected(self):
         result = size_action(0.30, 0.20, 0.0, 0.0, 0.50, 0.5, True, 100, 50, 20, 10)
@@ -85,7 +85,7 @@ class TestSkuSummary:
             {"size": "L", "is_flagged": True, "pct_small": 0.6, "pct_large": 0.0, "pct_quality": 0, "stock": 40},
         ]
         result = sku_summary(sizes)
-        assert "small" in result.lower()
+        assert "Too small" in result
 
 
 if __name__ == "__main__":

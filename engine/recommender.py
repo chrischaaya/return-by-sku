@@ -6,10 +6,10 @@ Size-level and SKU-level actions based on return reason patterns + stock levels.
 from typing import List
 
 # Relabel conditions: ALL must be met
-RELABEL_STOCK_THRESHOLD = 50       # min stock units
-RELABEL_RETURN_RATE = 0.60         # min return rate for the size
-RELABEL_MIN_SALES = 100            # min sold for confidence
-RELABEL_REASON_RATIO = 3.0         # min ratio of dominant reason
+RELABEL_STOCK_THRESHOLD = 50
+RELABEL_RETURN_RATE = 0.60
+RELABEL_MIN_SALES = 100
+RELABEL_REASON_RATIO = 3.0
 
 
 def size_action(
@@ -28,19 +28,17 @@ def size_action(
     if not is_flagged:
         return ""
 
-    # Not enough reason data — flag but don't diagnose
     if reason_count < min_reasons:
-        return "• High return rate. Not enough return reason data to diagnose. Inspect product."
+        return "• High return rate. Not enough data to diagnose. Inspect product."
 
     issues = []
     sizing_total = pct_small + pct_large
 
-    # --- Sizing axis (<2x mixed, 2-3x likely, >3x confident) ---
+    # --- Sizing axis ---
     if sizing_total > 0.1:
         ratio_s = pct_small / max(pct_large, 0.01) if pct_small > 0 else 0
         ratio_l = pct_large / max(pct_small, 0.01) if pct_large > 0 else 0
 
-        # Check relabel conditions: confident + high return rate + high stock + enough sales
         can_relabel = (
             stock >= RELABEL_STOCK_THRESHOLD
             and return_rate >= RELABEL_RETURN_RATE
@@ -48,53 +46,38 @@ def size_action(
         )
 
         if ratio_s >= 3 or (pct_small > 0 and pct_large == 0):
+            msg = "Too small (high confidence)"
             if can_relabel:
-                issues.append(f"Runs small for this size. Relabel stock ({stock} units) + size up next batch.")
-            else:
-                msg = "Runs small for this size. Size up next batch."
-                if stock > 50:
-                    msg += f" ({stock} units in stock)"
-                issues.append(msg)
+                msg += ". Relabel existing stock."
+            issues.append(msg)
         elif ratio_l >= 3 or (pct_large > 0 and pct_small == 0):
+            msg = "Too large (high confidence)"
             if can_relabel:
-                issues.append(f"Runs large for this size. Relabel stock ({stock} units) + size down next batch.")
-            else:
-                msg = "Runs large for this size. Size down next batch."
-                if stock > 50:
-                    msg += f" ({stock} units in stock)"
-                issues.append(msg)
+                msg += ". Relabel existing stock."
+            issues.append(msg)
         elif ratio_s >= 2:
-            msg = "Likely runs small for this size. Check measurements."
-            if stock > 50:
-                msg += f" ({stock} units in stock)"
-            issues.append(msg)
+            issues.append("Too small (mid confidence)")
         elif ratio_l >= 2:
-            msg = "Likely runs large for this size. Check measurements."
-            if stock > 50:
-                msg += f" ({stock} units in stock)"
-            issues.append(msg)
+            issues.append("Too large (mid confidence)")
         else:
-            issues.append("Mixed sizing feedback for this size.")
+            issues.append(f"Mixed results ({pct_small:.0%} small, {pct_large:.0%} large). Inspect product.")
 
     # --- Quality axis ---
     if pct_quality >= 0.40:
-        issues.append("Quality issue. Inspect stock.")
+        issues.append("Quality issue (high confidence). Inspect product.")
+    elif pct_quality >= 0.25:
+        issues.append("Quality issue (mid confidence). Inspect product.")
 
     # --- No clear pattern ---
     if not issues:
-        issues.append("Mixed feedback. Investigate due to high return rate.")
+        issues.append("No clear pattern. Inspect product.")
 
     return "\n".join(f"• {i}" for i in issues)
 
 
 def sku_summary(size_actions: List[dict]) -> str:
-    """
-    SKU-level summary. Generated when the majority of sizes (>50%) with reason
-    data lean the same direction. Also flags quality if elevated across sizes.
-    Falls back to a review prompt if no consistent pattern exists.
-    """
     flagged = [s for s in size_actions if s.get("is_flagged")]
-    all_sizes = size_actions  # includes non-flagged sizes too
+    all_sizes = size_actions
 
     if not flagged:
         return ""
@@ -106,11 +89,10 @@ def sku_summary(size_actions: List[dict]) -> str:
     avg_small = sum(s.get("pct_small", 0) for s in all_sizes) / n
     avg_large = sum(s.get("pct_large", 0) for s in all_sizes) / n
     avg_quality = sum(s.get("pct_quality", 0) for s in all_sizes) / n
-    total_stock = sum(s.get("stock", 0) for s in flagged)
 
     parts = []
 
-    # Consistent sizing — check majority (>50%) rather than requiring ALL sizes
+    # Majority lean check
     ratio_s = avg_small / max(avg_large, 0.01) if avg_small > 0 else 0
     ratio_l = avg_large / max(avg_small, 0.01) if avg_large > 0 else 0
 
@@ -136,21 +118,20 @@ def sku_summary(size_actions: List[dict]) -> str:
         majority_lean_large = False
 
     if ratio_s >= 3 or (avg_small > 0 and avg_large == 0):
-        parts.append("Runs small across all sizes. Revise measurements for next batch.")
+        parts.append("Too small across product (high confidence)")
     elif ratio_l >= 3 or (avg_large > 0 and avg_small == 0):
-        parts.append("Runs large across all sizes. Revise measurements for next batch.")
+        parts.append("Too large across product (high confidence)")
     elif ratio_s >= 2 and majority_lean_small:
-        parts.append("Likely runs small across most sizes. Check measurements with supplier.")
+        parts.append("Too small across product (mid confidence)")
     elif ratio_l >= 2 and majority_lean_large:
-        parts.append("Likely runs large across most sizes. Check measurements with supplier.")
+        parts.append("Too large across product (mid confidence)")
 
     if avg_quality >= 0.30:
-        parts.append("Quality/fit issue across sizes — check photos match actual product.")
+        parts.append("Quality issue across product. Inspect product.")
 
     if parts:
         if len(parts) > 1:
             return "\n".join(f"• {p}" for p in parts)
         return parts[0]
 
-    # No sizing pattern found — fallback
     return "Review individual sizes — no consistent pattern across product."
