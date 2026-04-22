@@ -418,7 +418,9 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
         # Expandable size table
         with st.expander("Size breakdown", expanded=False):
             if has_img:
-                _, tc = st.columns([1, 5])
+                ic, tc = st.columns([1, 5])
+                with ic:
+                    st.image(img_url, width=200)
             else:
                 tc = st.container()
             with tc:
