@@ -113,133 +113,62 @@ if show_settings:
 
 if st.session_state.get("show_settings"):
     with st.container(border=True):
-        st.subheader("⚙️ Settings")
+        st.markdown("**⚙️ Settings**")
         s = load_settings()
 
-        # --- Section 1: What gets flagged ---
-        st.markdown("**What gets flagged**")
-        c1, c2, c3 = st.columns(3)
+        # --- What gets flagged ---
+        st.caption("What gets flagged")
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
-            s["baseline_percentile"] = st.slider(
-                "Baseline percentile",
-                0.50, 0.95, float(s["baseline_percentile"]), 0.05,
-                help="Return rate percentile used as the 'normal' benchmark per category. Products with sizes above this are flagged. 0.75 means only the worst 25% are shown.",
-            )
+            s["baseline_percentile"] = st.number_input("Baseline percentile", 0.50, 0.95, float(s["baseline_percentile"]), 0.05, help="Return rate percentile used as 'normal' per category. 0.75 = only worst 25% flagged.")
         with c2:
-            s["min_recent_sales_per_size"] = st.number_input(
-                "Min sales/size — Bestsellers",
-                1, 100, int(s["min_recent_sales_per_size"]),
-                help="A size must have at least this many sales in the last 30 days to appear in the Bestsellers tab.",
-            )
-            s["min_reasons_bestsellers"] = st.number_input(
-                "Min returns for reasons — Bestsellers",
-                1, 100, int(s.get("min_reasons_bestsellers", 20)),
-                help="Minimum number of returns with a reason code before showing the % breakdown (too small, too large, etc). Below this, we show 'not enough data'.",
-            )
+            s["min_recent_sales_per_size"] = st.number_input("Min sales/size (30d)", 1, 100, int(s["min_recent_sales_per_size"]), help="A size needs this many sales in the last 30 days to be included.")
         with c3:
-            s["new_product_min_sales_per_size"] = st.number_input(
-                "Min sales/size — New Products",
-                1, 50, int(s.get("new_product_min_sales_per_size", 5)),
-                help="Same as above but for the New Products tab. Lower threshold to catch issues early.",
-            )
-            s["min_reasons_new_products"] = st.number_input(
-                "Min returns for reasons — New Products",
-                1, 50, int(s.get("min_reasons_new_products", 10)),
-                help="Same as above but for New Products. Lower to detect patterns earlier.",
-            )
-
-        st.markdown("")
-        c4, c5 = st.columns(2)
+            s["min_reasons_bestsellers"] = st.number_input("Min returns for reasons", 1, 100, int(s.get("min_reasons_bestsellers", 20)), help="Minimum returns with a reason code before showing the breakdown. Below this: 'not enough data'.")
         with c4:
-            s["new_product_max_age_days"] = st.number_input(
-                "New product window (days)",
-                7, 180, int(s.get("new_product_max_age_days", 45)),
-                help="Products with their first sale within this many days are considered 'new' and appear in the New Products tab instead of Bestsellers.",
-            )
+            s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
+        # Sync: new products use same min reasons, but lower min sales
+        s["new_product_min_sales_per_size"] = max(1, s["min_recent_sales_per_size"] // 2)
+        s["min_reasons_new_products"] = max(1, s["min_reasons_bestsellers"] // 2)
 
-        # --- Section 2: Confidence thresholds ---
-        st.markdown("---")
-        st.markdown("**Confidence thresholds**")
-        c6, c7, c8, c9 = st.columns(4)
+        # --- Confidence thresholds ---
+        st.caption("Confidence thresholds")
+        c5, c6, c7, c8 = st.columns(4)
+        with c5:
+            s["high_confidence_ratio"] = st.number_input("Sizing — high confidence (ratio)", 2.0, 10.0, float(s.get("high_confidence_ratio", 3.0)), 0.5, help="'Too small' returns must be this many times higher than 'too large' to be flagged as high confidence. E.g. 3x = 60% small vs 20% large.")
         with c6:
-            s["high_confidence_ratio"] = st.number_input(
-                "High confidence ratio",
-                2.0, 10.0, float(s.get("high_confidence_ratio", 3.0)), 0.5,
-                help="When 'too small' returns are this many times higher than 'too large' (or vice versa), we say 'high confidence'. Example: 3x means 60% small vs 20% large.",
-            )
+            s["mid_confidence_ratio"] = st.number_input("Sizing — mid confidence (ratio)", 1.5, 5.0, float(s.get("mid_confidence_ratio", 2.0)), 0.5, help="Same but for mid confidence. Between this and the high ratio.")
         with c7:
-            s["mid_confidence_ratio"] = st.number_input(
-                "Mid confidence ratio",
-                1.5, 5.0, float(s.get("mid_confidence_ratio", 2.0)), 0.5,
-                help="Same logic but for 'mid confidence'. Between this and the high ratio.",
-            )
+            s["quality_high_threshold"] = st.number_input("Quality — high confidence (%)", 0.20, 0.80, float(s.get("quality_high_threshold", 0.40)), 0.05, help="When this % or more of returns cite quality/expectation issues → high confidence.")
         with c8:
-            s["quality_high_threshold"] = st.slider(
-                "Quality — high confidence",
-                0.20, 0.80, float(s.get("quality_high_threshold", 0.40)), 0.05,
-                help="When this % or more of returns cite quality/expectation issues, we flag it as 'high confidence'.",
-            )
+            s["quality_mid_threshold"] = st.number_input("Quality — mid confidence (%)", 0.10, 0.50, float(s.get("quality_mid_threshold", 0.25)), 0.05, help="Same but for mid confidence.")
+
+        # --- Relabel conditions ---
+        st.caption("Relabel conditions")
+        c9, c10, c11 = st.columns(3)
         with c9:
-            s["quality_mid_threshold"] = st.slider(
-                "Quality — mid confidence",
-                0.10, 0.50, float(s.get("quality_mid_threshold", 0.25)), 0.05,
-                help="Same but for 'mid confidence'. Between this and the high threshold.",
-            )
-
-        # --- Section 3: Relabel conditions ---
-        st.markdown("---")
-        st.markdown("**When to suggest relabelling existing stock**")
-        c10, c11, c12 = st.columns(3)
+            s["relabel_min_stock"] = st.number_input("Min stock (units)", 10, 500, int(s.get("relabel_min_stock", 50)), help="Only suggest relabelling if at least this many units in Parkpalet.")
         with c10:
-            s["relabel_min_stock"] = st.number_input(
-                "Min stock in warehouse",
-                10, 500, int(s.get("relabel_min_stock", 50)),
-                help="Only suggest relabelling if there are at least this many units in Parkpalet warehouse.",
-            )
+            s["relabel_min_return_rate"] = st.number_input("Min return rate", 0.30, 0.90, float(s.get("relabel_min_return_rate", 0.60)), 0.05, help="Only suggest relabelling for return rates this high or above.")
         with c11:
-            s["relabel_min_return_rate"] = st.slider(
-                "Min return rate",
-                0.30, 0.90, float(s.get("relabel_min_return_rate", 0.60)), 0.05,
-                help="Only suggest relabelling if the size's return rate is at least this high. Relabelling is expensive — only worth it for severe cases.",
-            )
-        with c12:
-            s["relabel_min_sales"] = st.number_input(
-                "Min sales for confidence",
-                20, 500, int(s.get("relabel_min_sales", 100)),
-                help="Only suggest relabelling if the size has at least this many sales, so we're confident in the data.",
-            )
+            s["relabel_min_sales"] = st.number_input("Min sales", 20, 500, int(s.get("relabel_min_sales", 100)), help="Only suggest relabelling if enough sales to be confident.")
 
-        # --- Section 4: Data filters ---
-        st.markdown("---")
-        st.markdown("**Data filters**")
-        c13, c14, c15 = st.columns(3)
+        # --- Data filters ---
+        st.caption("Data filters")
+        c12, c13, c14 = st.columns(3)
+        with c12:
+            s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
         with c13:
-            s["fast_delivery_lag_days"] = st.number_input(
-                "Grace period — Trendyol, Hepsiburada (days)",
-                1, 30, int(s["fast_delivery_lag_days"]),
-                help="Exclude orders placed in the last N days. These orders may not be delivered yet, so customers can't return them.",
-            )
+            s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
         with c14:
-            s["slow_delivery_lag_days"] = st.number_input(
-                "Grace period — other channels (days)",
-                1, 30, int(s["slow_delivery_lag_days"]),
-                help="Same but for slower channels (Fashion Days, eMAG, Namshi, etc).",
-            )
-        with c15:
             all_channels = [
                 "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
                 "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
                 "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
                 "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
             ]
-            s["excluded_channels"] = st.multiselect(
-                "Excluded channels",
-                options=all_channels,
-                default=s["excluded_channels"],
-                help="These channels are completely excluded from all calculations.",
-            )
+            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=s["excluded_channels"], help="Completely excluded from all calculations.")
 
-        st.markdown("")
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
             config.reload_settings()
