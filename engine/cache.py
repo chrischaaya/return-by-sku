@@ -87,14 +87,20 @@ def load_cache() -> dict:
 
 def get_cache_age() -> str:
     """Return human-readable age of cache."""
-    coll = _coll()
-    meta = coll.find_one({"_id": "meta"}, {"updatedOn": 1})
-    if not meta or "updatedOn" not in meta:
-        return "never"
-    updated = meta["updatedOn"]
-    if updated.tzinfo is None:
-        updated = updated.replace(tzinfo=timezone.utc)
-    delta = datetime.now(timezone.utc) - updated
+    try:
+        coll = _coll()
+        meta = coll.find_one({"_id": "meta"}, {"updatedOn": 1})
+        if not meta or "updatedOn" not in meta:
+            return "never"
+        updated = meta["updatedOn"]
+        if not isinstance(updated, datetime):
+            return "unknown"
+        now = datetime.now(tz=None)
+        if updated.tzinfo is not None:
+            updated = updated.replace(tzinfo=None)
+        delta = now - updated
+    except Exception:
+        return "unknown"
     hours = delta.total_seconds() / 3600
     if hours < 1:
         return f"{int(delta.total_seconds() / 60)} min ago"
