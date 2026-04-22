@@ -436,7 +436,6 @@ def get_parkpalet_stock() -> list:
         {
             "$match": {
                 "providerKey": "parkpalet",
-                "merchantKey": config.MERCHANT_KEY,
                 "available": {"$gt": 0},
                 "skuPrefix": {"$in": hiccup_skus},
             }

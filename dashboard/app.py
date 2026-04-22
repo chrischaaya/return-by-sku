@@ -108,10 +108,35 @@ if "computed" not in st.session_state or should_update:
         else:
             df_sku_size["parkpalet_stock"] = 0
 
-    # Split into bestsellers vs rising stars
-    all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
-    rising_stars = all_flagged[all_flagged["is_rising_star"] == True]
-    bestsellers = all_flagged[~all_flagged["sku_prefix"].isin(rising_stars["sku_prefix"])]
+    # Rising stars: use lower threshold (5 sales/size)
+    df_sku_size["is_flagged_rising"] = (
+        (df_sku_size["return_rate"] > df_sku_size["size_p75"])
+        & (df_sku_size["sold"] >= config.RISING_STAR_MIN_SALES_PER_SIZE)
+    )
+    if "recent_sold" in df_sku_size.columns:
+        df_sku_size["qualifies_rising"] = df_sku_size["recent_sold"] >= config.RISING_STAR_MIN_SALES_PER_SIZE
+    else:
+        df_sku_size["qualifies_rising"] = False
+    df_sku_size["is_problematic_rising"] = df_sku_size["qualifies_rising"] & df_sku_size["is_flagged_rising"]
+
+    rising_problem_counts = (
+        df_sku_size[df_sku_size["is_problematic_rising"]]
+        .groupby("sku_prefix")["size"]
+        .count()
+        .rename("problematic_sizes_rising")
+    )
+    df_sku = df_sku.drop(columns=["problematic_sizes_rising"], errors="ignore")
+    df_sku = df_sku.merge(rising_problem_counts, on="sku_prefix", how="left")
+    df_sku["problematic_sizes_rising"] = df_sku["problematic_sizes_rising"].fillna(0).astype(int)
+
+    # Split: rising stars use lower threshold, bestsellers use standard
+    rising_stars = df_sku[
+        (df_sku["is_rising_star"] == True) & (df_sku["problematic_sizes_rising"] > 0)
+    ].copy()
+    bestsellers = df_sku[
+        (df_sku["problematic_sizes"] > 0)
+        & (~df_sku["sku_prefix"].isin(rising_stars["sku_prefix"]))
+    ].copy()
 
     st.session_state["computed"] = {
         "df_sku": df_sku,
@@ -147,15 +172,14 @@ with f3:
 if "Bestsellers" in view:
     display = bestsellers.sort_values("recent_sold", ascending=False)
     st.caption(
-        f"SKUs with ≥{config.MIN_RECENT_SALES_PER_SIZE} sales/size in last 30 days "
-        f"and return rate above category P75. Sorted by sales. "
-        f"{len(display)} SKUs."
+        f"Criteria: ≥{config.MIN_RECENT_SALES_PER_SIZE} sales/size in last 30 days + return rate above category P75. "
+        f"Sorted by sales. {len(display)} SKUs."
     )
 else:
     display = rising_stars.sort_values("recent_sold", ascending=False)
     st.caption(
-        f"Launched in last {config.RISING_STAR_MAX_AGE_DAYS} days with problematic sizes. "
-        f"{len(display)} SKUs."
+        f"Criteria: launched in last {config.RISING_STAR_MAX_AGE_DAYS} days + ≥{config.RISING_STAR_MIN_SALES_PER_SIZE} sales/size in last 30 days + return rate above category P75. "
+        f"Sorted by sales. {len(display)} SKUs."
     )
 
 # --- Apply filters ---
@@ -180,7 +204,9 @@ else:
 
         img_url = row.get("image_url")
         has_img = img_url and isinstance(img_url, str) and img_url.startswith("http")
-        n_problems = int(row.get("problematic_sizes", 0))
+        is_rising = "Rising" in view
+        n_problems = int(row.get("problematic_sizes_rising" if is_rising else "problematic_sizes", 0))
+        problematic_col = "is_problematic_rising" if is_rising else "is_problematic"
 
         # --- Collapsed row ---
         col_img, col_info = st.columns([1, 11])
@@ -223,13 +249,13 @@ else:
                                     s.get("pct_too_large", 0),
                                     s.get("pct_quality", 0),
                                     s.get("pct_other", 0),
-                                    s.get("is_problematic", False),
+                                    s.get(problematic_col, False),
                                     s.get("parkpalet_stock", 0),
                                 ),
                                 axis=1,
                             )
 
-                            is_problematic = sku_sizes["is_problematic"].values
+                            is_problematic = sku_sizes[problematic_col].values if problematic_col in sku_sizes.columns else sku_sizes["is_problematic"].values
 
                             if "parkpalet_stock" not in sku_sizes.columns:
                                 sku_sizes["parkpalet_stock"] = 0
@@ -261,7 +287,8 @@ else:
                             st.dataframe(styled, use_container_width=True, hide_index=True)
 
                             # SKU-level summary if pattern is consistent
-                            flagged_data = sku_sizes[sku_sizes["is_problematic"] == True].apply(
+                            _prob_col = problematic_col if problematic_col in sku_sizes.columns else "is_problematic"
+                            flagged_data = sku_sizes[sku_sizes[_prob_col] == True].apply(
                                 lambda s: {
                                     "size": s["size"],
                                     "is_flagged": True,

@@ -5,8 +5,6 @@ Size-level and SKU-level actions based on return reason patterns + stock levels.
 
 from typing import List
 
-import config
-
 # Stock threshold: if parkpalet stock > this, suggest relabelling
 RELABEL_STOCK_THRESHOLD = 50
 
@@ -21,64 +19,50 @@ def size_action(
     is_flagged: bool,
     stock: int = 0,
 ) -> str:
-    """
-    Size-level recommendation. Two axes: sizing + quality.
-    Stock-aware: if clear pattern + high stock → relabel existing stock.
-    """
     if not is_flagged:
         return ""
 
     issues = []
     sizing_total = pct_small + pct_large
-    clear_pattern = False
 
-    # --- Sizing axis ---
-    # Ratio thresholds: <2x = mixed, 2-3x = likely, >3x = confident
+    # --- Sizing axis (<2x mixed, 2-3x likely, >3x confident) ---
     if sizing_total > 0.1:
         ratio_s = pct_small / max(pct_large, 0.01) if pct_small > 0 else 0
         ratio_l = pct_large / max(pct_small, 0.01) if pct_large > 0 else 0
 
         if ratio_s >= 3 or (pct_small > 0 and pct_large == 0):
-            clear_pattern = True
             if stock >= RELABEL_STOCK_THRESHOLD:
-                issues.append(f"Runs small ({pct_small:.0%}). Relabel stock ({stock} units) + size up next batch.")
+                issues.append(f"Runs small. Relabel stock ({stock} units) + size up next batch.")
             else:
-                issues.append(f"Runs small ({pct_small:.0%}). Size up next batch.")
+                issues.append("Runs small. Size up next batch.")
         elif ratio_l >= 3 or (pct_large > 0 and pct_small == 0):
-            clear_pattern = True
             if stock >= RELABEL_STOCK_THRESHOLD:
-                issues.append(f"Runs large ({pct_large:.0%}). Relabel stock ({stock} units) + size down next batch.")
+                issues.append(f"Runs large. Relabel stock ({stock} units) + size down next batch.")
             else:
-                issues.append(f"Runs large ({pct_large:.0%}). Size down next batch.")
+                issues.append("Runs large. Size down next batch.")
         elif ratio_s >= 2:
-            issues.append(f"Likely runs small ({pct_small:.0%} vs {pct_large:.0%} large). Check measurements.")
+            issues.append("Likely runs small. Check measurements.")
         elif ratio_l >= 2:
-            issues.append(f"Likely runs large ({pct_large:.0%} vs {pct_small:.0%} small). Check measurements.")
+            issues.append("Likely runs large. Check measurements.")
         else:
-            issues.append(f"Mixed sizing ({pct_small:.0%} small, {pct_large:.0%} large). Review size chart.")
+            issues.append("Mixed sizing feedback.")
 
     # --- Quality axis ---
     if pct_quality >= 0.40:
-        issues.append(f"Quality issue ({pct_quality:.0%}). Review photos/description + inspect stock.")
+        issues.append("Quality issue. Review photos/description + inspect stock.")
     elif pct_quality >= 0.25:
-        issues.append(f"Quality concerns ({pct_quality:.0%}). Check listing accuracy.")
+        issues.append("Quality concerns. Check listing accuracy.")
 
     # --- Other axis ---
     if pct_other >= 0.40 and sizing_total < 0.20:
-        issues.append(f"High other returns ({pct_other:.0%}). Check customer reviews.")
+        issues.append("High non-sizing returns. Check customer reviews.")
 
-    if len(issues) > 1:
-        return "\n".join(f"• {i}" for i in issues)
     if issues:
-        return issues[0]
+        return "\n".join(f"• {i}" for i in issues)
     return f"Above P75 ({p75:.0%}). Investigate."
 
 
 def sku_summary(size_actions: List[dict]) -> str:
-    """
-    SKU-level summary looking at patterns across all problematic sizes.
-    Only generated when pattern is consistent across sizes.
-    """
     flagged = [s for s in size_actions if s.get("is_flagged")]
     if not flagged:
         return ""
@@ -91,7 +75,7 @@ def sku_summary(size_actions: List[dict]) -> str:
 
     parts = []
 
-    # Check if small sizes say "too large" and large sizes say "too small" (grading issue)
+    # Grading issue: small sizes say "too large", large sizes say "too small"
     small_group = [s for s in flagged if s.get("size", "").upper() in {"XXS", "XS", "S"}]
     large_group = [s for s in flagged if s.get("size", "").upper() in {"XL", "XXL", "2XL", "3XL"}]
     if small_group and large_group:
@@ -100,7 +84,7 @@ def sku_summary(size_actions: List[dict]) -> str:
         if small_says_large > 0.25 and large_says_small > 0.25:
             parts.append("Grading issue — size increments are off. Audit full size range with supplier.")
 
-    # Consistent sizing direction across all sizes (same 2x/3x thresholds)
+    # Consistent sizing (<2x mixed, 2-3x likely, >3x confident)
     if not parts:
         ratio_s = avg_small / max(avg_large, 0.01) if avg_small > 0 else 0
         ratio_l = avg_large / max(avg_small, 0.01) if avg_large > 0 else 0

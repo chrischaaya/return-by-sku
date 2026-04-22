@@ -65,6 +65,9 @@ REASON_CONCENTRATION_THRESHOLD = 0.40
 # Min sales per size in last 30 days for a SKU to qualify
 MIN_RECENT_SALES_PER_SIZE = 10
 
+# Rising stars: lower threshold for early detection
+RISING_STAR_MIN_SALES_PER_SIZE = 5
+
 # For trend/evolution: compare current period vs this many days prior
 TREND_COMPARISON_DAYS = 30
 
