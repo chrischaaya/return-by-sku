@@ -10,7 +10,7 @@ Three SKU views:
 
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -32,6 +32,9 @@ def load_data() -> dict:
     """
     Main entry point. Loads all-time data from MongoDB, computes all metrics.
     """
+    # Clear stale SKU prefix cache so we always get fresh data
+    pipelines.clear_cache()
+
     # --- Fetch raw data ---
     returns_raw = pipelines.get_all_returns_by_sku()
     orders_raw = pipelines.get_all_orders_by_sku()

@@ -3,7 +3,7 @@ Reusable insight card component.
 Displays: problem statement, diagnosis, recommended action.
 """
 
-from typing import Dict, Optional
+from typing import Optional
 
 import streamlit as st
 

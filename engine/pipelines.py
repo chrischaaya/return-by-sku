@@ -17,6 +17,12 @@ from engine.connection import get_db
 _hiccup_sku_prefixes = None
 
 
+def clear_cache():
+    """Reset the module-level SKU prefix cache so next call re-fetches from MongoDB."""
+    global _hiccup_sku_prefixes
+    _hiccup_sku_prefixes = None
+
+
 def _cutoff_fast() -> datetime:
     """Cutoff for fast-delivery channels (trendyol, hepsiburada)."""
     return datetime.now(timezone.utc) - timedelta(days=config.FAST_DELIVERY_LAG_DAYS)
@@ -303,84 +309,6 @@ def get_sku_first_order_dates() -> list:
     ]
 
     return list(db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True))
-
-
-def get_returns_last_30d_by_sku() -> list:
-    """
-    Returns in the last 30 days at skuPrefix level.
-    Used for 'recovering' trend comparison.
-    """
-    db = get_db()
-    hiccup_skus = get_hiccup_sku_prefixes()
-    if not hiccup_skus:
-        return []
-
-    start = datetime.now(timezone.utc) - timedelta(days=30)
-
-    pipeline = [
-        {
-            "$match": {
-                "createdOn": {"$gte": start},
-                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
-            }
-        },
-        {"$unwind": "$items"},
-        {
-            "$match": {
-                "items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES},
-                "items.skuPrefix": {"$in": hiccup_skus},
-            }
-        },
-        {
-            "$group": {
-                "_id": "$items.skuPrefix",
-                "returned_recent": {"$sum": "$items.quantity"},
-            }
-        },
-        {"$project": {"_id": 0, "sku_prefix": "$_id", "returned_recent": 1}},
-    ]
-
-    return list(db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True))
-
-
-def get_returns_prev_30d_by_sku() -> list:
-    """
-    Returns from 30-60 days ago at skuPrefix level.
-    Used for 'recovering' trend comparison.
-    """
-    db = get_db()
-    hiccup_skus = get_hiccup_sku_prefixes()
-    if not hiccup_skus:
-        return []
-
-    now = datetime.now(timezone.utc)
-    start = now - timedelta(days=60)
-    end = now - timedelta(days=30)
-
-    pipeline = [
-        {
-            "$match": {
-                "createdOn": {"$gte": start, "$lte": end},
-                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
-            }
-        },
-        {"$unwind": "$items"},
-        {
-            "$match": {
-                "items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES},
-                "items.skuPrefix": {"$in": hiccup_skus},
-            }
-        },
-        {
-            "$group": {
-                "_id": "$items.skuPrefix",
-                "returned_prev": {"$sum": "$items.quantity"},
-            }
-        },
-        {"$project": {"_id": 0, "sku_prefix": "$_id", "returned_prev": 1}},
-    ]
-
-    return list(db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True))
 
 
 def get_product_metadata() -> list:

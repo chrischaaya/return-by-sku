@@ -45,54 +45,69 @@ def _coll():
 
 def save_action(sku_prefix: str, action_summary: str, stock_snapshot: dict,
                 return_rates: dict, overall_rate: float, flagged_sizes: list):
-    _coll().update_one(
-        {"skuPrefix": sku_prefix},
-        {"$set": {
-            "status": "waiting_for_fix",
-            "actionSummary": action_summary,
-            "updatedOn": datetime.now(timezone.utc),
-            "stockAtAction": stock_snapshot,
-            "returnRateAtAction": return_rates,
-            "overallRateAtAction": overall_rate,
-            "flaggedSizes": flagged_sizes,
-            "oldStockDepletedOn": {},
-            "newStockFirstSeenOn": {},
-            "newBatchReturnRate": {},
-            "newBatchSales": {},
-            "fixedOn": None,
-        }, "$setOnInsert": {
-            "createdOn": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
+    try:
+        _coll().update_one(
+            {"skuPrefix": sku_prefix},
+            {"$set": {
+                "status": "waiting_for_fix",
+                "actionSummary": action_summary,
+                "updatedOn": datetime.now(timezone.utc),
+                "stockAtAction": stock_snapshot,
+                "returnRateAtAction": return_rates,
+                "overallRateAtAction": overall_rate,
+                "flaggedSizes": flagged_sizes,
+                "oldStockDepletedOn": {},
+                "newStockFirstSeenOn": {},
+                "newBatchReturnRate": {},
+                "newBatchSales": {},
+                "fixedOn": None,
+            }, "$setOnInsert": {
+                "createdOn": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+    except Exception as e:
+        st.error(f"Failed to save action for {sku_prefix}: {e}")
 
 
 def save_no_action(sku_prefix: str):
-    _coll().update_one(
-        {"skuPrefix": sku_prefix},
-        {"$set": {
-            "status": "no_action",
-            "updatedOn": datetime.now(timezone.utc),
-        }, "$setOnInsert": {
-            "createdOn": datetime.now(timezone.utc),
-        }},
-        upsert=True,
-    )
+    try:
+        _coll().update_one(
+            {"skuPrefix": sku_prefix},
+            {"$set": {
+                "status": "no_action",
+                "updatedOn": datetime.now(timezone.utc),
+            }, "$setOnInsert": {
+                "createdOn": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
+    except Exception as e:
+        st.error(f"Failed to save no-action for {sku_prefix}: {e}")
 
 
 def dismiss_sku(sku_prefix: str):
-    _coll().update_one(
-        {"skuPrefix": sku_prefix},
-        {"$set": {"status": "dismissed", "updatedOn": datetime.now(timezone.utc)}},
-    )
+    try:
+        _coll().update_one(
+            {"skuPrefix": sku_prefix},
+            {"$set": {"status": "dismissed", "updatedOn": datetime.now(timezone.utc)}},
+        )
+    except Exception as e:
+        st.error(f"Failed to dismiss {sku_prefix}: {e}")
 
 
 def revert_waiting(sku_prefix: str):
-    _coll().delete_one({"skuPrefix": sku_prefix})
+    try:
+        _coll().delete_one({"skuPrefix": sku_prefix})
+    except Exception as e:
+        st.error(f"Failed to revert {sku_prefix}: {e}")
 
 
 def revert_no_action(sku_prefix: str):
-    _coll().delete_one({"skuPrefix": sku_prefix})
+    try:
+        _coll().delete_one({"skuPrefix": sku_prefix})
+    except Exception as e:
+        st.error(f"Failed to revert {sku_prefix}: {e}")
 
 
 # --- Read operations ---
@@ -399,5 +414,8 @@ def seed_test_scenarios():
         },
     ]
 
-    for s in scenarios:
-        coll.replace_one({"skuPrefix": s["skuPrefix"]}, s, upsert=True)
+    try:
+        for s in scenarios:
+            coll.replace_one({"skuPrefix": s["skuPrefix"]}, s, upsert=True)
+    except Exception as e:
+        st.error(f"Failed to seed test scenarios: {e}")

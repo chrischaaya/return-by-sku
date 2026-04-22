@@ -4,7 +4,6 @@ Loaded on app start, saved on user change.
 """
 
 from datetime import datetime, timezone
-from typing import Optional
 
 import streamlit as st
 from pymongo import MongoClient

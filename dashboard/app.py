@@ -7,6 +7,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import math
+
 import streamlit as st
 import pandas as pd
 
@@ -43,9 +45,10 @@ def size_sort_key(s):
         return 999
 
 
-def issue_label(ps, pl, pq, po, has_reasons):
+def issue_label(ps, pl, pq, po, has_reasons, reason_count=None):
     if not has_reasons:
         return "Not enough data"
+    low_data = reason_count is not None and reason_count < 30
     sizing = ps + pl
     if sizing > 0.1:
         rs = ps / max(pl, 0.01) if ps > 0 else 0
@@ -59,13 +62,21 @@ def issue_label(ps, pl, pq, po, has_reasons):
         elif rl >= 2:
             lbl = "Likely runs large"
         else:
-            lbl = "Mixed sizing"
+            lbl = f"Sizing varies ({ps:.0%} small, {pl:.0%} large)"
         if pq >= 0.25:
             lbl += " + Quality issue"
+        if low_data:
+            lbl += " (low data)"
         return lbl
     if pq >= 0.25:
-        return "Quality issue"
-    return "Mixed feedback"
+        lbl = "Quality issue"
+        if low_data:
+            lbl += " (low data)"
+        return lbl
+    lbl = "No dominant pattern — review product"
+    if low_data:
+        lbl += " (low data)"
+    return lbl
 
 
 # --- CSS ---
@@ -104,9 +115,9 @@ if st.session_state.get("show_settings"):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             s["baseline_percentile"] = st.slider(
-                "Baseline percentile",
+                "Sensitivity",
                 0.50, 0.95, float(s["baseline_percentile"]), 0.05,
-                help="Percentile of category return rates used as 'normal'. P75 = only worst 25% flagged.",
+                help="Percentile used as the normal benchmark. Products above this are flagged.",
             )
             s["min_recent_sales_per_size"] = st.number_input(
                 "Min sales/size (Bestsellers)", 1, 100, int(s["min_recent_sales_per_size"]),
@@ -215,6 +226,17 @@ if "computed" not in st.session_state:
             df_sku = df_sku.merge(cts, on="sku_prefix", how="left")
             df_sku[cn] = df_sku[cn].fillna(0).astype(int)
 
+    # --- Compute priority score ---
+    # priority = deviation_pct * sqrt(recent_sold) * (1 + 0.2 * n_problematic_sizes)
+    if "deviation_pct" in df_sku.columns and "recent_sold" in df_sku.columns:
+        df_sku["priority_score"] = (
+            df_sku["deviation_pct"].clip(lower=0)
+            * df_sku["recent_sold"].apply(lambda x: math.sqrt(max(x, 0)))
+            * (1 + 0.2 * df_sku["problematic_sizes"])
+        )
+    else:
+        df_sku["priority_score"] = 0
+
     if "parkpalet_stock" not in df_sku_size.columns:
         from engine.pipelines import get_parkpalet_stock
         sr = get_parkpalet_stock()
@@ -265,7 +287,7 @@ def render_size_table(sku_prefix, is_rising=False, show_details=False):
     if "parkpalet_stock" not in ss.columns:
         ss["parkpalet_stock"] = 0
     ss["hr"] = ss["reason_count"] >= mr
-    ss["issue"] = ss.apply(lambda r: issue_label(r.get("pct_too_small", 0), r.get("pct_too_large", 0), r.get("pct_quality", 0), r.get("pct_other", 0), r["hr"]), axis=1)
+    ss["issue"] = ss.apply(lambda r: issue_label(r.get("pct_too_small", 0), r.get("pct_too_large", 0), r.get("pct_quality", 0), r.get("pct_other", 0), r["hr"], reason_count=r.get("reason_count", 0)), axis=1)
     ss["act"] = ss.apply(lambda r: size_action(r["return_rate"], p75, r.get("pct_too_small", 0), r.get("pct_too_large", 0), r.get("pct_quality", 0), r.get("pct_other", 0), r.get(pc, False), r.get("parkpalet_stock", 0), r.get("sold", 0), r.get("reason_count", 0), mr), axis=1)
     ip = ss[pc].values if pc in ss.columns else [False] * len(ss)
 
@@ -283,7 +305,7 @@ def render_size_table(sku_prefix, is_rising=False, show_details=False):
         t_o = (ss["pct_other"] * rc).sum() / trc
     else:
         t_s = t_l = t_q = t_o = 0
-    ti = issue_label(t_s, t_l, t_q, t_o, htr)
+    ti = issue_label(t_s, t_l, t_q, t_o, htr, reason_count=trc)
     ad = ss.apply(lambda r: {"size": r["size"], "is_flagged": r.get(pc, False), "pct_small": r.get("pct_too_small", 0) if r["hr"] else 0, "pct_large": r.get("pct_too_large", 0) if r["hr"] else 0, "pct_quality": r.get("pct_quality", 0) if r["hr"] else 0, "stock": r.get("parkpalet_stock", 0)}, axis=1).tolist()
     ta = sku_summary(ad) or ("High return rate. Not enough data to diagnose." if not htr else "")
 
@@ -348,7 +370,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
             st.caption(f"{sku} · {row.get('supplier_name', 'N/A')} · {row.get('category_l3', '')}")
             st.markdown(
                 f'<div class="problem-box">'
-                f'Return rate: <b>{rate:.1%}</b> · Category avg: {baseline:.1%} · '
+                f'Return rate: <b>{rate:.1%}</b> · Category norm: {baseline:.1%} · '
                 f'<span class="sizes-affected">{n_prob} size{"s" if n_prob != 1 else ""} affected</span>'
                 f'</div>',
                 unsafe_allow_html=True,
@@ -412,7 +434,7 @@ with tab_att:
     with r1:
         show_new = st.toggle("New products only", value=False)
     with r2:
-        sort_by = st.selectbox("Sort by", ["Sales (highest)", "Severity (worst)", "Newest first"], key="att_sort")
+        sort_by = st.selectbox("Sort by", ["Priority (impact)", "Sales (highest)", "Severity (worst)", "Newest first"], key="att_sort")
     with r3:
         search = st.text_input("Search", placeholder="Product or SKU", key="att_search")
     with r4:
@@ -423,7 +445,9 @@ with tab_att:
         sel_sup = st.selectbox("Supplier", ["All"] + sups, key="att_sup")
 
     display = rising_stars.copy() if show_new else needs_attention.copy()
-    if sort_by == "Sales (highest)":
+    if sort_by == "Priority (impact)":
+        display = display.sort_values("priority_score", ascending=False)
+    elif sort_by == "Sales (highest)":
         display = display.sort_values("recent_sold", ascending=False)
     elif sort_by == "Severity (worst)":
         display = display.sort_values("deviation", ascending=False)

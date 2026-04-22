@@ -49,24 +49,36 @@ def size_action(
 
         if ratio_s >= 3 or (pct_small > 0 and pct_large == 0):
             if can_relabel:
-                issues.append(f"Runs small. Relabel stock ({stock} units) + size up next batch.")
+                issues.append(f"Runs small for this size. Relabel stock ({stock} units) + size up next batch.")
             else:
-                issues.append("Runs small. Size up next batch.")
+                msg = "Runs small for this size. Size up next batch."
+                if stock > 50:
+                    msg += f" ({stock} units in stock)"
+                issues.append(msg)
         elif ratio_l >= 3 or (pct_large > 0 and pct_small == 0):
             if can_relabel:
-                issues.append(f"Runs large. Relabel stock ({stock} units) + size down next batch.")
+                issues.append(f"Runs large for this size. Relabel stock ({stock} units) + size down next batch.")
             else:
-                issues.append("Runs large. Size down next batch.")
+                msg = "Runs large for this size. Size down next batch."
+                if stock > 50:
+                    msg += f" ({stock} units in stock)"
+                issues.append(msg)
         elif ratio_s >= 2:
-            issues.append("Likely runs small. Check measurements.")
+            msg = "Likely runs small for this size. Check measurements."
+            if stock > 50:
+                msg += f" ({stock} units in stock)"
+            issues.append(msg)
         elif ratio_l >= 2:
-            issues.append("Likely runs large. Check measurements.")
+            msg = "Likely runs large for this size. Check measurements."
+            if stock > 50:
+                msg += f" ({stock} units in stock)"
+            issues.append(msg)
         else:
-            issues.append("Mixed sizing feedback.")
+            issues.append("Mixed sizing feedback for this size.")
 
     # --- Quality axis ---
     if pct_quality >= 0.40:
-        issues.append("Quality issue. Inspect stock.")
+        issues.append("Quality/fit issue — check photos match actual product.")
 
     # --- No clear pattern ---
     if not issues:
@@ -77,9 +89,9 @@ def size_action(
 
 def sku_summary(size_actions: List[dict]) -> str:
     """
-    SKU-level summary. Only generated when feedback is consistent across ALL sizes
-    (not just flagged ones). Looks at the full picture to detect patterns that
-    individual sizes might miss.
+    SKU-level summary. Generated when the majority of sizes (>50%) with reason
+    data lean the same direction. Also flags quality if elevated across sizes.
+    Falls back to a review prompt if no consistent pattern exists.
     """
     flagged = [s for s in size_actions if s.get("is_flagged")]
     all_sizes = size_actions  # includes non-flagged sizes too
@@ -98,32 +110,47 @@ def sku_summary(size_actions: List[dict]) -> str:
 
     parts = []
 
-    # Consistent sizing across ALL sizes (not just flagged)
+    # Consistent sizing — check majority (>50%) rather than requiring ALL sizes
     ratio_s = avg_small / max(avg_large, 0.01) if avg_small > 0 else 0
     ratio_l = avg_large / max(avg_small, 0.01) if avg_large > 0 else 0
 
-    # Check if EVERY size leans the same direction (at least 1.5x each)
-    all_lean_small = all(
-        (s.get("pct_small", 0) / max(s.get("pct_large", 0), 0.01) >= 1.5)
-        for s in all_sizes if (s.get("pct_small", 0) + s.get("pct_large", 0)) > 0.1
-    )
-    all_lean_large = all(
-        (s.get("pct_large", 0) / max(s.get("pct_small", 0), 0.01) >= 1.5)
-        for s in all_sizes if (s.get("pct_small", 0) + s.get("pct_large", 0)) > 0.1
-    )
+    sizes_with_sizing = [
+        s for s in all_sizes
+        if (s.get("pct_small", 0) + s.get("pct_large", 0)) > 0.1
+    ]
+    n_sizing = len(sizes_with_sizing)
+
+    if n_sizing > 0:
+        lean_small_count = sum(
+            1 for s in sizes_with_sizing
+            if s.get("pct_small", 0) / max(s.get("pct_large", 0), 0.01) >= 1.5
+        )
+        lean_large_count = sum(
+            1 for s in sizes_with_sizing
+            if s.get("pct_large", 0) / max(s.get("pct_small", 0), 0.01) >= 1.5
+        )
+        majority_lean_small = lean_small_count > n_sizing * 0.5
+        majority_lean_large = lean_large_count > n_sizing * 0.5
+    else:
+        majority_lean_small = False
+        majority_lean_large = False
 
     if ratio_s >= 3 or (avg_small > 0 and avg_large == 0):
         parts.append("Runs small across all sizes. Revise measurements for next batch.")
     elif ratio_l >= 3 or (avg_large > 0 and avg_small == 0):
         parts.append("Runs large across all sizes. Revise measurements for next batch.")
-    elif ratio_s >= 2 and all_lean_small:
-        parts.append("Likely runs small across all sizes. Check measurements with supplier.")
-    elif ratio_l >= 2 and all_lean_large:
-        parts.append("Likely runs large across all sizes. Check measurements with supplier.")
+    elif ratio_s >= 2 and majority_lean_small:
+        parts.append("Likely runs small across most sizes. Check measurements with supplier.")
+    elif ratio_l >= 2 and majority_lean_large:
+        parts.append("Likely runs large across most sizes. Check measurements with supplier.")
 
     if avg_quality >= 0.30:
-        parts.append("Quality issue across all sizes. Inspect stock.")
+        parts.append("Quality/fit issue across sizes — check photos match actual product.")
 
-    if len(parts) > 1:
-        return "\n".join(f"• {p}" for p in parts)
-    return parts[0] if parts else ""
+    if parts:
+        if len(parts) > 1:
+            return "\n".join(f"• {p}" for p in parts)
+        return parts[0]
+
+    # No sizing pattern found — fallback
+    return "Review individual sizes — no consistent pattern across product."

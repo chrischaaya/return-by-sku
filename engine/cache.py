@@ -4,7 +4,6 @@ Split across multiple documents to stay under 16MB BSON limit.
 """
 
 from datetime import datetime, timezone
-import json
 import zlib
 
 import pandas as pd
@@ -74,11 +73,21 @@ def load_cache() -> dict:
 
     result = {"updatedOn": meta.get("updatedOn")}
 
+    # Known datetime columns per cache key
+    datetime_columns = {
+        "df_sku": ["first_order"],
+    }
+
     for key in CACHE_KEYS:
         doc = coll.find_one({"_id": key})
         if doc and "data" in doc:
             json_str = zlib.decompress(doc["data"]).decode()
-            result[key] = pd.read_json(json_str, orient="records")
+            df = pd.read_json(json_str, orient="records")
+            # Convert known datetime columns back from strings
+            for col in datetime_columns.get(key, []):
+                if col in df.columns:
+                    df[col] = pd.to_datetime(df[col], errors="coerce", utc=True)
+            result[key] = df
         else:
             result[key] = pd.DataFrame()
 
