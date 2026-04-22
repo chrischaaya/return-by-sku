@@ -1,11 +1,11 @@
 """
 Data cache in MongoDB (hiccup-tools.DataCache).
-Pre-computed results are stored and read back instantly.
-Only recomputed when user clicks "Update Data".
+Split across multiple documents to stay under 16MB BSON limit.
 """
 
 from datetime import datetime, timezone
 import json
+import zlib
 
 import pandas as pd
 import streamlit as st
@@ -17,6 +17,8 @@ WRITE_URI = (
 )
 
 _write_client = None
+
+CACHE_KEYS = ["df_sku", "df_sku_size", "df_supplier", "df_category", "df_recent_size"]
 
 
 def _get_db():
@@ -32,49 +34,64 @@ def _coll():
 
 
 def save_cache(data: dict):
-    """Save pre-computed DataFrames to MongoDB."""
-    cache_doc = {"_id": "latest", "updatedOn": datetime.now(timezone.utc)}
+    """Save each DataFrame as a separate compressed document."""
+    coll = _coll()
+    now = datetime.now(timezone.utc)
 
-    for key, df in data.items():
+    for key in CACHE_KEYS:
+        df = data.get(key)
+        if df is None or (isinstance(df, pd.DataFrame) and df.empty):
+            continue
+
         if isinstance(df, pd.DataFrame):
-            # Convert datetime columns to string for JSON serialization
             df_copy = df.copy()
             for col in df_copy.columns:
                 if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
                     df_copy[col] = df_copy[col].astype(str)
-                elif df_copy[col].dtype == object:
-                    # Handle lists and other objects
-                    pass
-            cache_doc[key] = json.loads(df_copy.to_json(orient="records", default_handler=str))
-        else:
-            cache_doc[key] = data[key]
 
-    _coll().replace_one({"_id": "latest"}, cache_doc, upsert=True)
+            json_str = df_copy.to_json(orient="records", default_handler=str)
+            compressed = zlib.compress(json_str.encode(), level=6)
+
+            coll.replace_one(
+                {"_id": key},
+                {"_id": key, "data": compressed, "rows": len(df), "updatedOn": now},
+                upsert=True,
+            )
+
+    coll.replace_one(
+        {"_id": "meta"},
+        {"_id": "meta", "updatedOn": now},
+        upsert=True,
+    )
 
 
 def load_cache() -> dict:
-    """Load pre-computed DataFrames from MongoDB. Returns None if no cache."""
-    doc = _coll().find_one({"_id": "latest"})
-    if not doc:
+    """Load cached DataFrames from MongoDB."""
+    coll = _coll()
+    meta = coll.find_one({"_id": "meta"})
+    if not meta:
         return None
 
-    result = {}
-    for key in ["df_sku", "df_sku_size", "df_supplier", "df_category", "df_recent_size"]:
-        if key in doc and doc[key]:
-            result[key] = pd.DataFrame(doc[key])
+    result = {"updatedOn": meta.get("updatedOn")}
+
+    for key in CACHE_KEYS:
+        doc = coll.find_one({"_id": key})
+        if doc and "data" in doc:
+            json_str = zlib.decompress(doc["data"]).decode()
+            result[key] = pd.read_json(json_str, orient="records")
         else:
             result[key] = pd.DataFrame()
 
-    result["updatedOn"] = doc.get("updatedOn")
     return result
 
 
 def get_cache_age() -> str:
     """Return human-readable age of cache."""
-    doc = _coll().find_one({"_id": "latest"}, {"updatedOn": 1})
-    if not doc or "updatedOn" not in doc:
+    coll = _coll()
+    meta = coll.find_one({"_id": "meta"}, {"updatedOn": 1})
+    if not meta or "updatedOn" not in meta:
         return "never"
-    delta = datetime.now(timezone.utc) - doc["updatedOn"]
+    delta = datetime.now(timezone.utc) - meta["updatedOn"]
     hours = delta.total_seconds() / 3600
     if hours < 1:
         return f"{int(delta.total_seconds() / 60)} min ago"
