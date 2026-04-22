@@ -17,23 +17,12 @@ _write_client = None
 
 DEFAULTS = {
     # What gets flagged
-    "baseline_percentile": 0.75,
+    "trigger_multiplier": 1.3,
     "min_recent_sales_per_size": 10,
     "new_product_min_sales_per_size": 5,
     "new_product_max_age_days": 45,
     "min_reasons_bestsellers": 20,
     "min_reasons_new_products": 10,
-    # Flagging trigger
-    "trigger_multiplier": 1.3,
-    # Confidence thresholds
-    "high_confidence_ratio": 3.0,
-    "mid_confidence_ratio": 2.0,
-    "quality_high_threshold": 0.40,
-    "quality_mid_threshold": 0.25,
-    # Relabel conditions
-    "relabel_min_stock": 50,
-    "relabel_min_return_rate": 0.60,
-    "relabel_min_sales": 100,
     # Data filters
     "fast_delivery_lag_days": 7,
     "slow_delivery_lag_days": 14,

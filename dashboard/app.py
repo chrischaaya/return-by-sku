@@ -118,7 +118,7 @@ if st.session_state.get("show_settings"):
 
         # --- What gets flagged ---
         st.caption("What gets flagged")
-        c1, c2, c3, c4, c5 = st.columns(5)
+        c1, c2, c3, c4 = st.columns(4)
         with c1:
             s["trigger_multiplier"] = st.number_input("Trigger multiplier", 1.1, 2.0, float(s.get("trigger_multiplier", 1.3)), 0.1, help="A size is flagged if its return rate is above the category median × this value. 1.3 = 30% above median.")
         with c2:
@@ -127,42 +127,17 @@ if st.session_state.get("show_settings"):
             s["min_reasons_bestsellers"] = st.number_input("Min returns for reasons", 1, 100, int(s.get("min_reasons_bestsellers", 20)), help="Minimum returns with a reason code before showing the breakdown. Below this: 'not enough data'.")
         with c4:
             s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
-        with c5:
-            s["baseline_percentile"] = st.number_input("Baseline percentile", 0.50, 0.95, float(s["baseline_percentile"]), 0.05, help="Used for deviation calculation and priority scoring. Not used for flagging (trigger multiplier is used instead).")
-        # Sync: new products use same min reasons, but lower min sales
         s["new_product_min_sales_per_size"] = max(1, s["min_recent_sales_per_size"] // 2)
         s["min_reasons_new_products"] = max(1, s["min_reasons_bestsellers"] // 2)
 
-        # --- Confidence thresholds ---
-        st.caption("Confidence thresholds")
-        c5, c6, c7, c8 = st.columns(4)
-        with c5:
-            s["high_confidence_ratio"] = st.number_input("Sizing — high confidence (ratio)", 2.0, 10.0, float(s.get("high_confidence_ratio", 3.0)), 0.5, help="'Too small' returns must be this many times higher than 'too large' to be flagged as high confidence. E.g. 3x = 60% small vs 20% large.")
-        with c6:
-            s["mid_confidence_ratio"] = st.number_input("Sizing — mid confidence (ratio)", 1.5, 5.0, float(s.get("mid_confidence_ratio", 2.0)), 0.5, help="Same but for mid confidence. Between this and the high ratio.")
-        with c7:
-            s["quality_high_threshold"] = st.number_input("Quality — high confidence (%)", 0.20, 0.80, float(s.get("quality_high_threshold", 0.40)), 0.05, help="When this % or more of returns cite quality/expectation issues → high confidence.")
-        with c8:
-            s["quality_mid_threshold"] = st.number_input("Quality — mid confidence (%)", 0.10, 0.50, float(s.get("quality_mid_threshold", 0.25)), 0.05, help="Same but for mid confidence.")
-
-        # --- Relabel conditions ---
-        st.caption("Relabel conditions")
-        c9, c10, c11 = st.columns(3)
-        with c9:
-            s["relabel_min_stock"] = st.number_input("Min stock (units)", 10, 500, int(s.get("relabel_min_stock", 50)), help="Only suggest relabelling if at least this many units in Parkpalet.")
-        with c10:
-            s["relabel_min_return_rate"] = st.number_input("Min return rate", 0.30, 0.90, float(s.get("relabel_min_return_rate", 0.60)), 0.05, help="Only suggest relabelling for return rates this high or above.")
-        with c11:
-            s["relabel_min_sales"] = st.number_input("Min sales", 20, 500, int(s.get("relabel_min_sales", 100)), help="Only suggest relabelling if enough sales to be confident.")
-
         # --- Data filters ---
         st.caption("Data filters")
-        c12, c13, c14 = st.columns(3)
-        with c12:
+        c5, c6, c7 = st.columns(3)
+        with c5:
             s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
-        with c13:
+        with c6:
             s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
-        with c14:
+        with c7:
             all_channels = [
                 "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
                 "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
@@ -484,7 +459,7 @@ with tab_att:
     with r1:
         show_new = st.toggle("New products only", value=False)
     with r2:
-        sort_by = st.selectbox("Sort by", ["Priority (impact)", "Sales (highest)", "Newest first"], key="att_sort")
+        sort_by = st.selectbox("Sort by", ["Priority (impact)", "Sales (highest)", "Returns (most)", "Newest first"], key="att_sort")
     with r3:
         search = st.text_input("Search", placeholder="Product or SKU", key="att_search")
     with r4:
@@ -499,6 +474,8 @@ with tab_att:
         display = display.sort_values("priority_score", ascending=False)
     elif sort_by == "Sales (highest)":
         display = display.sort_values("recent_sold", ascending=False)
+    elif sort_by == "Returns (most)":
+        display = display.sort_values("total_returned", ascending=False)
     else:
         if "first_order" in display.columns:
             display = display.sort_values("first_order", ascending=False, na_position="last")
