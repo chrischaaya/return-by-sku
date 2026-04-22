@@ -288,6 +288,18 @@ def _check_new_batch_performance(
 # Test scenarios
 # =====================================================================
 
+def clear_test_scenarios():
+    """Remove all test scenario data from MongoDB."""
+    try:
+        test_skus = [
+            "MBAJ1ZFU01", "M6GLCY4Q02", "MGTBGRL601", "M6RLJVMH02",
+            "MGP6D8RJ01", "M3HAU69901", "ML6TCQKI01", "MH5BERYM02",
+        ]
+        _coll().delete_many({"skuPrefix": {"$in": test_skus}})
+    except Exception as e:
+        st.error(f"Failed to clear test data: {e}")
+
+
 def seed_test_scenarios():
     """Seed MongoDB with test scenarios covering all states."""
     coll = _coll()

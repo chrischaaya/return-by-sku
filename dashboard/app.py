@@ -25,7 +25,7 @@ from engine.recommender import size_action, sku_summary
 from engine.actions import (
     save_action, save_no_action, dismiss_sku, revert_no_action,
     revert_waiting, get_excluded_skus, get_skus_by_status,
-    check_transitions, seed_test_scenarios, get_action,
+    check_transitions, seed_test_scenarios, clear_test_scenarios, get_action,
 )
 from engine.cache import save_cache, load_cache, get_cache_age
 from engine.settings import load_settings, save_settings, DEFAULTS
@@ -100,6 +100,10 @@ with h3:
         seed_test_scenarios()
         st.session_state.pop("computed", None)
         st.toast("Test scenarios loaded!")
+    if st.button("Clear Test Data", use_container_width=True):
+        clear_test_scenarios()
+        st.session_state.pop("computed", None)
+        st.toast("Test data cleared!")
 with h4:
     show_settings = st.button("⚙️", use_container_width=True)
 
@@ -439,7 +443,7 @@ with tab_att:
     with r1:
         show_new = st.toggle("New products only", value=False)
     with r2:
-        sort_by = st.selectbox("Sort by", ["Priority (impact)", "Sales (highest)", "Severity (worst)", "Newest first"], key="att_sort")
+        sort_by = st.selectbox("Sort by", ["Priority (impact)", "Sales (highest)", "Newest first"], key="att_sort")
     with r3:
         search = st.text_input("Search", placeholder="Product or SKU", key="att_search")
     with r4:
@@ -454,8 +458,6 @@ with tab_att:
         display = display.sort_values("priority_score", ascending=False)
     elif sort_by == "Sales (highest)":
         display = display.sort_values("recent_sold", ascending=False)
-    elif sort_by == "Severity (worst)":
-        display = display.sort_values("deviation", ascending=False)
     else:
         if "first_order" in display.columns:
             display = display.sort_values("first_order", ascending=False, na_position="last")
