@@ -113,43 +113,119 @@ if show_settings:
 
 if st.session_state.get("show_settings"):
     with st.container(border=True):
-        st.subheader("Settings")
+        st.subheader("⚙️ Settings")
         s = load_settings()
 
-        c1, c2, c3, c4 = st.columns(4)
+        # --- Section 1: What gets flagged ---
+        st.markdown("**What gets flagged**")
+        c1, c2, c3 = st.columns(3)
         with c1:
             s["baseline_percentile"] = st.slider(
                 "Baseline percentile",
                 0.50, 0.95, float(s["baseline_percentile"]), 0.05,
-                help="Percentile of category return rates used as 'normal'. P75 = only worst 25% flagged.",
-            )
-            s["min_recent_sales_per_size"] = st.number_input(
-                "Min sales/size (Bestsellers)", 1, 100, int(s["min_recent_sales_per_size"]),
-                help="Minimum sales per size in last 30 days to qualify.",
+                help="Return rate percentile used as the 'normal' benchmark per category. Products with sizes above this are flagged. 0.75 means only the worst 25% are shown.",
             )
         with c2:
-            s["rising_star_min_sales_per_size"] = st.number_input(
-                "Min sales/size (Rising Stars)", 1, 50, int(s["rising_star_min_sales_per_size"]),
-                help="Lower threshold for new products.",
+            s["min_recent_sales_per_size"] = st.number_input(
+                "Min sales/size — Bestsellers",
+                1, 100, int(s["min_recent_sales_per_size"]),
+                help="A size must have at least this many sales in the last 30 days to appear in the Bestsellers tab.",
             )
-            s["rising_star_max_age_days"] = st.number_input(
-                "New product window (days)", 7, 180, int(s["rising_star_max_age_days"]),
-                help="Products first sold within this many days count as 'new'.",
+            s["min_reasons_bestsellers"] = st.number_input(
+                "Min returns for reasons — Bestsellers",
+                1, 100, int(s.get("min_reasons_bestsellers", 20)),
+                help="Minimum number of returns with a reason code before showing the % breakdown (too small, too large, etc). Below this, we show 'not enough data'.",
             )
         with c3:
-            s["fast_delivery_lag_days"] = st.number_input(
-                "Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]),
-                help="Trendyol, Hepsiburada. Exclude recent orders that haven't been delivered yet.",
+            s["new_product_min_sales_per_size"] = st.number_input(
+                "Min sales/size — New Products",
+                1, 50, int(s.get("new_product_min_sales_per_size", 5)),
+                help="Same as above but for the New Products tab. Lower threshold to catch issues early.",
             )
-            s["slow_delivery_lag_days"] = st.number_input(
-                "Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]),
-                help="All channels except Trendyol/Hepsiburada.",
+            s["min_reasons_new_products"] = st.number_input(
+                "Min returns for reasons — New Products",
+                1, 50, int(s.get("min_reasons_new_products", 10)),
+                help="Same as above but for New Products. Lower to detect patterns earlier.",
             )
+
+        st.markdown("")
+        c4, c5 = st.columns(2)
         with c4:
-            s["min_size_volume"] = st.number_input(
-                "Min sales for reason data", 1, 100, int(s["min_size_volume"]),
-                help="Minimum all-time sales to show return reason breakdown.",
+            s["new_product_max_age_days"] = st.number_input(
+                "New product window (days)",
+                7, 180, int(s.get("new_product_max_age_days", 45)),
+                help="Products with their first sale within this many days are considered 'new' and appear in the New Products tab instead of Bestsellers.",
             )
+
+        # --- Section 2: Confidence thresholds ---
+        st.markdown("---")
+        st.markdown("**Confidence thresholds**")
+        c6, c7, c8, c9 = st.columns(4)
+        with c6:
+            s["high_confidence_ratio"] = st.number_input(
+                "High confidence ratio",
+                2.0, 10.0, float(s.get("high_confidence_ratio", 3.0)), 0.5,
+                help="When 'too small' returns are this many times higher than 'too large' (or vice versa), we say 'high confidence'. Example: 3x means 60% small vs 20% large.",
+            )
+        with c7:
+            s["mid_confidence_ratio"] = st.number_input(
+                "Mid confidence ratio",
+                1.5, 5.0, float(s.get("mid_confidence_ratio", 2.0)), 0.5,
+                help="Same logic but for 'mid confidence'. Between this and the high ratio.",
+            )
+        with c8:
+            s["quality_high_threshold"] = st.slider(
+                "Quality — high confidence",
+                0.20, 0.80, float(s.get("quality_high_threshold", 0.40)), 0.05,
+                help="When this % or more of returns cite quality/expectation issues, we flag it as 'high confidence'.",
+            )
+        with c9:
+            s["quality_mid_threshold"] = st.slider(
+                "Quality — mid confidence",
+                0.10, 0.50, float(s.get("quality_mid_threshold", 0.25)), 0.05,
+                help="Same but for 'mid confidence'. Between this and the high threshold.",
+            )
+
+        # --- Section 3: Relabel conditions ---
+        st.markdown("---")
+        st.markdown("**When to suggest relabelling existing stock**")
+        c10, c11, c12 = st.columns(3)
+        with c10:
+            s["relabel_min_stock"] = st.number_input(
+                "Min stock in warehouse",
+                10, 500, int(s.get("relabel_min_stock", 50)),
+                help="Only suggest relabelling if there are at least this many units in Parkpalet warehouse.",
+            )
+        with c11:
+            s["relabel_min_return_rate"] = st.slider(
+                "Min return rate",
+                0.30, 0.90, float(s.get("relabel_min_return_rate", 0.60)), 0.05,
+                help="Only suggest relabelling if the size's return rate is at least this high. Relabelling is expensive — only worth it for severe cases.",
+            )
+        with c12:
+            s["relabel_min_sales"] = st.number_input(
+                "Min sales for confidence",
+                20, 500, int(s.get("relabel_min_sales", 100)),
+                help="Only suggest relabelling if the size has at least this many sales, so we're confident in the data.",
+            )
+
+        # --- Section 4: Data filters ---
+        st.markdown("---")
+        st.markdown("**Data filters**")
+        c13, c14, c15 = st.columns(3)
+        with c13:
+            s["fast_delivery_lag_days"] = st.number_input(
+                "Grace period — Trendyol, Hepsiburada (days)",
+                1, 30, int(s["fast_delivery_lag_days"]),
+                help="Exclude orders placed in the last N days. These orders may not be delivered yet, so customers can't return them.",
+            )
+        with c14:
+            s["slow_delivery_lag_days"] = st.number_input(
+                "Grace period — other channels (days)",
+                1, 30, int(s["slow_delivery_lag_days"]),
+                help="Same but for slower channels (Fashion Days, eMAG, Namshi, etc).",
+            )
+        with c15:
             all_channels = [
                 "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
                 "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
@@ -160,13 +236,13 @@ if st.session_state.get("show_settings"):
                 "Excluded channels",
                 options=all_channels,
                 default=s["excluded_channels"],
-                help="Channels to exclude from all analysis.",
+                help="These channels are completely excluded from all calculations.",
             )
 
+        st.markdown("")
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
             config.reload_settings()
-            # Force full recalculation
             with st.spinner("Recalculating with new settings..."):
                 st.session_state["data"] = load_data()
                 save_cache(st.session_state["data"])
@@ -283,7 +359,7 @@ tab_att, tab_prog, tab_res, tab_park = st.tabs([
 # =====================================================================
 def render_size_table(sku_prefix, is_rising=False, show_details=False):
     pc = "is_problematic_rising" if is_rising else "is_problematic"
-    mr = config.RISING_STAR_MIN_SALES_PER_SIZE if is_rising else config.MIN_RECENT_SALES_PER_SIZE
+    mr = config.MIN_SIZE_VOLUME_RISING if is_rising else config.MIN_SIZE_VOLUME
     ss = df_sku_size[df_sku_size["sku_prefix"] == sku_prefix].copy()
     if ss.empty:
         return
