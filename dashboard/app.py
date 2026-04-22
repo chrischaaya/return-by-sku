@@ -83,6 +83,9 @@ st.markdown("""
     .problem-box { padding: 12px 16px; border-radius: 8px; margin-bottom: 8px; border-left: 4px solid #e74c3c; background: #fef2f2; }
     .action-box { padding: 12px 16px; border-radius: 8px; background: #f0f9ff; border-left: 4px solid #3b82f6; }
     .progress-card { padding: 12px 16px; border-radius: 8px; background: #fffbeb; border-left: 4px solid #f59e0b; margin-bottom: 8px; }
+    .sku-card { border: 1px solid #e0e0e0; border-radius: 10px; padding: 14px 16px; margin-bottom: 12px; background: #ffffff; }
+    .sku-card:hover { border-color: #bbb; }
+    .new-badge { display: inline-block; background: #22c55e; color: white; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-left: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -341,25 +344,36 @@ def render_size_table(sku_prefix, is_rising=False, show_details=False):
 # TAB 1: NEEDS ATTENTION
 # =====================================================================
 with tab_attention:
-    # Toggle: All / New Products
-    view_col, filter_col1, filter_col2, filter_col3 = st.columns([1.5, 1.5, 1.5, 1.5])
-    with view_col:
+    # Controls row
+    r1, r2, r3, r4, r5 = st.columns([1.2, 1.2, 1.2, 1.2, 1.2])
+    with r1:
         show_new = st.toggle("New products only", value=False)
-    with filter_col1:
+    with r2:
+        sort_by = st.selectbox("Sort by", ["Sales (highest)", "Severity (worst)", "Newest first"], key="att_sort")
+    with r3:
         search = st.text_input("Search", placeholder="Product name or SKU", key="att_search")
-    with filter_col2:
+    with r4:
         cats = sorted(needs_attention["category_l3"].dropna().unique().tolist())
         sel_cat = st.selectbox("Category", ["All"] + cats, key="att_cat")
-    with filter_col3:
+    with r5:
         sups = sorted(needs_attention["supplier_name"].dropna().unique().tolist())
         sel_sup = st.selectbox("Supplier", ["All"] + sups, key="att_sup")
 
     if show_new:
-        display = rising_stars.sort_values("recent_sold", ascending=False)
+        display = rising_stars.copy()
     else:
-        display = needs_attention.sort_values("recent_sold", ascending=False)
+        display = needs_attention.copy()
 
-    # Apply filters
+    # Sorting
+    if sort_by == "Sales (highest)":
+        display = display.sort_values("recent_sold", ascending=False)
+    elif sort_by == "Severity (worst)":
+        display = display.sort_values("deviation", ascending=False)
+    else:  # Newest first
+        if "first_order" in display.columns:
+            display = display.sort_values("first_order", ascending=False, na_position="last")
+
+    # Filters
     if search:
         q = search.lower()
         display = display[display["sku_prefix"].str.lower().str.contains(q, na=False) | display["product_name"].astype(str).str.lower().str.contains(q, na=False)]
@@ -383,7 +397,8 @@ with tab_attention:
             baseline = row.get("category_baseline", 0)
             sev_text, sev_color = severity_badge(n_prob, row.get("return_rate", 0), baseline)
 
-            # --- Card ---
+            # --- Card in a box ---
+            st.markdown('<div class="sku-card">', unsafe_allow_html=True)
             col_img, col_main, col_sev = st.columns([1, 8, 2])
             with col_img:
                 if has_img:
@@ -391,7 +406,7 @@ with tab_attention:
             with col_main:
                 line1 = f"**{name}**"
                 if is_rising:
-                    line1 += " &nbsp; `NEW`"
+                    line1 += ' <span class="new-badge">NEW</span>'
                 st.markdown(line1, unsafe_allow_html=True)
                 st.caption(f"{sku} · {row.get('supplier_name', 'N/A')} · {row.get('category_l3', '')}")
             with col_sev:
@@ -447,7 +462,7 @@ with tab_attention:
                     show_details = st.checkbox("Show detailed breakdown", key=f"det_{sku}", value=False)
                     render_size_table(sku, is_rising=is_rising, show_details=show_details)
 
-            st.markdown("")  # spacing
+            st.markdown('</div>', unsafe_allow_html=True)  # close sku-card
 
 
 # =====================================================================
@@ -556,8 +571,7 @@ with tab_results:
                 if st.button("✓ Dismiss — issue resolved", key=f"dis_{sku}", use_container_width=False):
                     dismiss_sku(sku)
                     st.session_state.pop("computed", None)
-                    st.toast(f"Dismissed {sku}")
-                    st.rerun()
+                    st.toast(f"Dismissed: {name}")
 
             st.markdown("")
 
