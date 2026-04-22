@@ -99,9 +99,14 @@ if "computed" not in st.session_state or should_update:
 
     # Ensure parkpalet_stock survived merges
     if "parkpalet_stock" not in df_sku_size.columns:
-        stock_data = data["df_sku_size"][["sku_prefix", "size", "parkpalet_stock"]].drop_duplicates()
-        df_sku_size = df_sku_size.merge(stock_data, on=["sku_prefix", "size"], how="left")
-        df_sku_size["parkpalet_stock"] = df_sku_size["parkpalet_stock"].fillna(0).astype(int)
+        from engine.pipelines import get_parkpalet_stock
+        stock_raw = get_parkpalet_stock()
+        if stock_raw:
+            df_stock = pd.DataFrame(stock_raw)
+            df_sku_size = df_sku_size.merge(df_stock, on=["sku_prefix", "size"], how="left")
+            df_sku_size["parkpalet_stock"] = df_sku_size["parkpalet_stock"].fillna(0).astype(int)
+        else:
+            df_sku_size["parkpalet_stock"] = 0
 
     # Split into bestsellers vs rising stars
     all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
