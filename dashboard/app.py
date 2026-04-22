@@ -201,11 +201,13 @@ if "computed" not in st.session_state:
     if df_sku_size is not None and not df_sku_size.empty:
         bp = df_sku_size[df_sku_size["sold"] >= 20].copy()
         sp75 = bp.groupby("category_l3")["return_rate"].quantile(config.BASELINE_PERCENTILE).rename("size_p75")
-        cat_avg = bp.groupby("category_l3")["return_rate"].mean().rename("category_avg")
+        cat_totals = bp.groupby("category_l3").agg(_s=("sold", "sum"), _r=("returned", "sum"))
+        cat_totals["category_avg"] = cat_totals["_r"] / cat_totals["_s"]
+        cat_avg = cat_totals["category_avg"]
         df_sku_size = df_sku_size.merge(sp75, on="category_l3", how="left")
         df_sku_size = df_sku_size.merge(cat_avg, on="category_l3", how="left")
         gp75 = bp["return_rate"].quantile(config.BASELINE_PERCENTILE) if not bp.empty else 0
-        gavg = bp["return_rate"].mean() if not bp.empty else 0
+        gavg = bp["returned"].sum() / bp["sold"].sum() if not bp.empty and bp["sold"].sum() > 0 else 0
         df_sku_size["size_p75"] = df_sku_size["size_p75"].fillna(gp75)
         df_sku_size["category_avg"] = df_sku_size["category_avg"].fillna(gavg)
         df_sku_size["is_flagged"] = (df_sku_size["return_rate"] > df_sku_size["size_p75"]) & (df_sku_size["sold"] >= config.MIN_RECENT_SALES_PER_SIZE)
