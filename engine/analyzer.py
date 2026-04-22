@@ -27,38 +27,6 @@ def _build_reason_summary(reasons: list) -> Tuple[Optional[str], float, dict]:
     return top, top_count / len(reasons), dict(counts)
 
 
-def _classify_problem(
-    top_reason: Optional[str],
-    reason_pct: float,
-    reason_counts: dict,
-    size_concentration: float,
-    anomaly_sizes: List[dict],
-    has_reason_data: bool,
-) -> str:
-    sizing_total = sum(reason_counts.get(r, 0) for r in config.SIZING_REASONS)
-    total = sum(reason_counts.values()) if reason_counts else 0
-    sizing_share = sizing_total / total if total > 0 else 0
-
-    if size_concentration > config.SIZE_CONCENTRATION_THRESHOLD:
-        return "SIZING"
-
-    if has_reason_data and total > 0:
-        if sizing_share > 0.40:
-            return "SIZING"
-        if reason_counts.get("DEFECTIVE_PRODUCT", 0) / total > 0.30:
-            return "QUALITY"
-        if reason_counts.get("EXPECTATION_MISMATCH", 0) / total > 0.35:
-            return "LISTING"
-        if reason_pct >= config.REASON_CONCENTRATION_THRESHOLD and top_reason:
-            if top_reason in config.SIZING_REASONS:
-                return "SIZING"
-            if top_reason in config.QUALITY_REASONS:
-                return "QUALITY"
-            if top_reason in config.LISTING_REASONS:
-                return "LISTING"
-
-    return "UNKNOWN"
-
 
 def load_data() -> dict:
     """
@@ -70,8 +38,6 @@ def load_data() -> dict:
     recent_sales_raw = pipelines.get_recent_sales_by_sku_size()
     products_raw = pipelines.get_product_metadata()
     first_orders_raw = pipelines.get_sku_first_order_dates()
-    returns_recent_raw = pipelines.get_returns_last_30d_by_sku()
-    returns_prev_raw = pipelines.get_returns_prev_30d_by_sku()
     stock_raw = pipelines.get_parkpalet_stock()
 
     # --- Build DataFrames ---
@@ -93,12 +59,6 @@ def load_data() -> dict:
     )
     df_first = pd.DataFrame(first_orders_raw) if first_orders_raw else pd.DataFrame(
         columns=["sku_prefix", "first_order"]
-    )
-    df_ret_recent = pd.DataFrame(returns_recent_raw) if returns_recent_raw else pd.DataFrame(
-        columns=["sku_prefix", "returned_recent"]
-    )
-    df_ret_prev = pd.DataFrame(returns_prev_raw) if returns_prev_raw else pd.DataFrame(
-        columns=["sku_prefix", "returned_prev"]
     )
     df_stock = pd.DataFrame(stock_raw) if stock_raw else pd.DataFrame(
         columns=["sku_prefix", "size", "parkpalet_stock"]
@@ -142,7 +102,7 @@ def load_data() -> dict:
 
     # --- SKU level ---
     df_sku = _compute_sku_level(df_sku_size, df_ret, df_prod, df_recent, df_first,
-                                 df_ret_recent, df_ret_prev, qualifying_skus)
+                                 qualifying_skus)
 
     # --- Supplier level ---
     df_supplier = _compute_supplier_level(df_sku)
@@ -230,8 +190,6 @@ def _compute_sku_level(
     df_prod: pd.DataFrame,
     df_recent: pd.DataFrame,
     df_first: pd.DataFrame,
-    df_ret_recent: pd.DataFrame,
-    df_ret_prev: pd.DataFrame,
     qualifying_skus: set,
 ) -> pd.DataFrame:
     if df_sku_size.empty:
@@ -337,34 +295,6 @@ def _compute_sku_level(
     sku_agg["pct_quality"] = pcts.apply(lambda x: x[2])
     sku_agg["pct_other_reason"] = pcts.apply(lambda x: x[3])
 
-    # --- Size anomaly analysis ---
-    size_stats = _compute_size_anomalies(df_sku_size)
-    sku_agg = sku_agg.merge(size_stats, on="sku_prefix", how="left")
-    sku_agg["size_concentration"] = sku_agg["size_concentration"].fillna(1.0)
-    sku_agg["has_sizing_issue"] = (
-        sku_agg["size_concentration"] > config.SIZE_CONCENTRATION_THRESHOLD
-    )
-    sku_agg["anomaly_sizes"] = sku_agg["anomaly_sizes"].apply(
-        lambda x: x if isinstance(x, list) else []
-    )
-
-    # --- Problem classification ---
-    sku_agg["problem_type"] = sku_agg.apply(
-        lambda row: _classify_problem(
-            row["top_reason"],
-            row["top_reason_pct"],
-            row["reason_counts"] if isinstance(row["reason_counts"], dict) else {},
-            row["size_concentration"],
-            row["anomaly_sizes"],
-            row["has_reason_data"],
-        ),
-        axis=1,
-    )
-
-    # --- Trend analysis (recovering) ---
-    # Only for top N SKUs by recent sales
-    sku_agg = _add_trend_data(sku_agg, df_recent, df_ret_recent, df_ret_prev)
-
     # --- Rising star flag ---
     cutoff_date = datetime.now(timezone.utc) - timedelta(days=config.RISING_STAR_MAX_AGE_DAYS)
     if not sku_agg["first_order"].empty and sku_agg["first_order"].notna().any():
@@ -386,86 +316,6 @@ def _compute_sku_level(
 
     return sku_agg
 
-
-def _add_trend_data(
-    df_sku: pd.DataFrame,
-    df_recent: pd.DataFrame,
-    df_ret_recent: pd.DataFrame,
-    df_ret_prev: pd.DataFrame,
-) -> pd.DataFrame:
-    """Add trend data for top SKUs: compare last 30d returns vs previous 30d returns."""
-    if df_sku.empty:
-        df_sku["returned_recent"] = 0
-        df_sku["returned_prev"] = 0
-        df_sku["rate_recent"] = None
-        df_sku["rate_prev"] = None
-        df_sku["trend"] = 0.0
-        df_sku["is_recovering"] = False
-        return df_sku
-
-    # Merge recent/prev return counts
-    df_sku = df_sku.merge(df_ret_recent, on="sku_prefix", how="left")
-    df_sku["returned_recent"] = df_sku["returned_recent"].fillna(0).astype(int)
-
-    df_sku = df_sku.merge(df_ret_prev, on="sku_prefix", how="left")
-    df_sku["returned_prev"] = df_sku["returned_prev"].fillna(0).astype(int)
-
-    # For trend, we need sales in each period too — approximate using recent_sold
-    # for both periods (not perfect but avoids 2 more queries)
-    # rate_recent = returned_recent / recent_sold
-    # rate_prev = returned_prev / recent_sold (same denominator as proxy)
-    df_sku["rate_recent"] = float("nan")
-    df_sku["rate_prev"] = float("nan")
-    df_sku["trend"] = 0.0
-    df_sku["is_recovering"] = False
-
-    # Only compute trends for top N by recent sales
-    top_mask = df_sku["recent_sold"] > 0
-    top_skus = df_sku.loc[top_mask].nlargest(config.TOP_SKU_FOR_TRENDS, "recent_sold").index
-
-    mask = df_sku.index.isin(top_skus)
-    if mask.any():
-        recent_sold = df_sku.loc[mask, "recent_sold"].replace(0, 1).astype(float)
-        rate_recent = (df_sku.loc[mask, "returned_recent"].astype(float) / recent_sold).clip(upper=1.0)
-        rate_prev = (df_sku.loc[mask, "returned_prev"].astype(float) / recent_sold).clip(upper=1.0)
-        df_sku.loc[mask, "rate_recent"] = rate_recent.values
-        df_sku.loc[mask, "rate_prev"] = rate_prev.values
-        df_sku.loc[mask, "trend"] = (rate_recent.fillna(0) - rate_prev.fillna(0)).values
-        df_sku.loc[mask, "is_recovering"] = (
-            (df_sku.loc[mask, "trend"] < -0.05)
-            & (df_sku.loc[mask, "returned_prev"] >= 3)
-        )
-
-    return df_sku
-
-
-def _compute_size_anomalies(df_sku_size: pd.DataFrame) -> pd.DataFrame:
-    qualified = df_sku_size[df_sku_size["sold"] >= config.MIN_SIZE_VOLUME].copy()
-    if qualified.empty:
-        return pd.DataFrame(
-            {"sku_prefix": pd.Series(dtype=str), "size_concentration": pd.Series(dtype=float), "anomaly_sizes": pd.Series(dtype=object)}
-        )
-
-    results = []
-    for sku, group in qualified.groupby("sku_prefix"):
-        rates = group["return_rate"]
-        if len(rates) < 2 or rates.mean() == 0:
-            results.append({"sku_prefix": sku, "size_concentration": 1.0, "anomaly_sizes": []})
-            continue
-
-        concentration = rates.max() / rates.mean()
-        threshold = rates.mean() * config.SIZE_CONCENTRATION_THRESHOLD
-        anomalies = group[group["return_rate"] > threshold][
-            ["size", "return_rate", "sold", "returned"]
-        ].to_dict("records")
-
-        results.append({
-            "sku_prefix": sku,
-            "size_concentration": concentration,
-            "anomaly_sizes": anomalies,
-        })
-
-    return pd.DataFrame(results)
 
 
 def _compute_supplier_level(df_sku: pd.DataFrame) -> pd.DataFrame:
