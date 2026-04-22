@@ -321,9 +321,9 @@ def render_size_table(sku_prefix, is_rising=False, show_details=False):
         return f"{v:.0%}" if h and v > 0 else "—"
 
     if show_details:
-        cols = ["Size", "Sold", "Returns", "Return Rate", "Issue", "% Small", "% Large", "% Quality", "% Other", "Stock", "Action"]
+        cols = ["Size", "Sold", "Returns", "Return Rate", "% Small", "% Large", "% Quality", "% Other", "Stock", "Action"]
     else:
-        cols = ["Size", "Sold", "Returns", "Return Rate", "Issue", "Stock", "Action"]
+        cols = ["Size", "Sold", "Returns", "Return Rate", "Stock", "Action"]
 
     rows = []
     for i, (_, r) in enumerate(ss.iterrows()):

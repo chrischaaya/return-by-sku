@@ -59,7 +59,7 @@ def size_action(
             issues.append("Too small (mid confidence)")
         elif ratio_l >= 2:
             issues.append("Too large (mid confidence)")
-        else:
+        elif pct_small >= 0.10 or pct_large >= 0.10:
             issues.append(f"Mixed results ({pct_small:.0%} small, {pct_large:.0%} large). Inspect product.")
 
     # --- Quality axis ---
