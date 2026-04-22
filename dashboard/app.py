@@ -214,12 +214,17 @@ else:
             if has_img:
                 st.image(img_url, width=60)
         with col_info:
-            with st.expander(
+            # Build expander label
+            label = (
                 f"**{row['sku_prefix']}** — {name} — "
                 f"Last 30d: {row['recent_sold']:,} sold — "
-                f"**{n_problems} problematic size{'s' if n_problems != 1 else ''}**",
-                expanded=False,
-            ):
+                f"**{n_problems} problematic size{'s' if n_problems != 1 else ''}**"
+            )
+            if is_rising and pd.notna(row.get("first_order")):
+                first_order = pd.to_datetime(row["first_order"])
+                label += f" — First sale: {first_order.strftime('%d %b %Y')}"
+
+            with st.expander(label, expanded=False):
                 # --- Expanded: image + size table ---
                 if df_sku_size is not None and not df_sku_size.empty:
                     sku_sizes = df_sku_size[df_sku_size["sku_prefix"] == row["sku_prefix"]].copy()
