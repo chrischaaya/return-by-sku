@@ -50,7 +50,7 @@ def issue_label(ps, pl, pq, po, has_reasons, reason_count=None):
         return "Not enough data"
     low_data = reason_count is not None and reason_count < 10
     sizing = ps + pl
-    if sizing > 0.1:
+    if sizing >= 0.25:
         rs = ps / max(pl, 0.01) if ps > 0 else 0
         rl = pl / max(ps, 0.01) if pl > 0 else 0
         if rs >= 3 or (ps > 0 and pl == 0):
@@ -127,8 +127,9 @@ if st.session_state.get("show_settings"):
             s["min_reasons_bestsellers"] = st.number_input("Min returns for reasons", 1, 100, int(s.get("min_reasons_bestsellers", 20)), help="Minimum returns with a reason code before showing the breakdown. Below this: 'not enough data'.")
         with c4:
             s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
-        s["new_product_min_sales_per_size"] = max(1, s["min_recent_sales_per_size"] // 2)
-        s["min_reasons_new_products"] = max(1, s["min_reasons_bestsellers"] // 2)
+        # New products use same thresholds
+        s["new_product_min_sales_per_size"] = s["min_recent_sales_per_size"]
+        s["min_reasons_new_products"] = s["min_reasons_bestsellers"]
 
         # --- Data filters ---
         st.caption("Data filters")
@@ -239,7 +240,7 @@ if "computed" not in st.session_state:
 
         df_sku_size["is_problematic"] = df_sku_size["qualifies_size"] & df_sku_size["is_flagged"]
         df_sku_size["is_flagged_rising"] = df_sku_size["return_rate"] > df_sku_size["trigger"]
-        df_sku_size["qualifies_rising"] = df_sku_size.get("recent_sold", 0) >= config.RISING_STAR_MIN_SALES_PER_SIZE
+        df_sku_size["qualifies_rising"] = df_sku_size.get("recent_sold", 0) >= config.MIN_RECENT_SALES_PER_SIZE
         df_sku_size["is_problematic_rising"] = df_sku_size["qualifies_rising"] & df_sku_size["is_flagged_rising"]
 
         for cn, pc in [("problematic_sizes", "is_problematic"), ("problematic_sizes_rising", "is_problematic_rising")]:
@@ -297,7 +298,7 @@ tab_att, tab_prog, tab_res, tab_park = st.tabs([
 # =====================================================================
 def render_size_table(sku_prefix, is_rising=False, show_details=False):
     pc = "is_problematic_rising" if is_rising else "is_problematic"
-    mr = config.MIN_SIZE_VOLUME_RISING if is_rising else config.MIN_SIZE_VOLUME
+    mr = config.MIN_SIZE_VOLUME
     ss = df_sku_size[df_sku_size["sku_prefix"] == sku_prefix].copy()
     if ss.empty:
         return

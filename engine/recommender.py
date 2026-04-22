@@ -34,7 +34,7 @@ def size_action(
     sizing_total = pct_small + pct_large
 
     # --- Sizing axis: one direction >=2x the other ---
-    if sizing_total > 0.1:
+    if sizing_total >= 0.25:
         ratio_s = pct_small / max(pct_large, 0.01) if pct_small > 0 else 0
         ratio_l = pct_large / max(pct_small, 0.01) if pct_large > 0 else 0
 
@@ -42,7 +42,7 @@ def size_action(
             issues.append("Too small")
         elif ratio_l >= SIZING_RATIO or (pct_large > 0 and pct_small == 0):
             issues.append("Too large")
-        elif pct_small >= 0.10 or pct_large >= 0.10:
+        else:
             issues.append(f"Mixed results ({pct_small:.0%} small, {pct_large:.0%} large). Inspect product.")
 
     # --- Quality axis: >=25% ---
