@@ -23,6 +23,8 @@ DEFAULTS = {
     "new_product_max_age_days": 45,
     "min_reasons_bestsellers": 20,
     "min_reasons_new_products": 10,
+    # Flagging trigger
+    "trigger_multiplier": 1.3,
     # Confidence thresholds
     "high_confidence_ratio": 3.0,
     "mid_confidence_ratio": 2.0,

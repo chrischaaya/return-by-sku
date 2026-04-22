@@ -41,6 +41,9 @@ RISING_STAR_MAX_AGE_DAYS = _s["new_product_max_age_days"]
 MIN_SIZE_VOLUME = _s.get("min_reasons_bestsellers", 20)
 MIN_SIZE_VOLUME_RISING = _s.get("min_reasons_new_products", 10)
 
+# Flagging trigger
+TRIGGER_MULTIPLIER = _s.get("trigger_multiplier", 1.3)
+
 # Confidence thresholds
 HIGH_CONFIDENCE_RATIO = _s.get("high_confidence_ratio", 3.0)
 MID_CONFIDENCE_RATIO = _s.get("mid_confidence_ratio", 2.0)
@@ -60,7 +63,7 @@ EXCLUDED_CHANNELS = _s["excluded_channels"]
 
 def reload_settings():
     """Reload settings from MongoDB and update module-level variables."""
-    global BASELINE_PERCENTILE, MIN_RECENT_SALES_PER_SIZE, RISING_STAR_MIN_SALES_PER_SIZE
+    global BASELINE_PERCENTILE, MIN_RECENT_SALES_PER_SIZE, RISING_STAR_MIN_SALES_PER_SIZE, TRIGGER_MULTIPLIER
     global RISING_STAR_MAX_AGE_DAYS, FAST_DELIVERY_LAG_DAYS, SLOW_DELIVERY_LAG_DAYS
     global MIN_SIZE_VOLUME, MIN_SIZE_VOLUME_RISING, EXCLUDED_CHANNELS
     global HIGH_CONFIDENCE_RATIO, MID_CONFIDENCE_RATIO
@@ -73,6 +76,7 @@ def reload_settings():
     RISING_STAR_MAX_AGE_DAYS = s["new_product_max_age_days"]
     MIN_SIZE_VOLUME = s.get("min_reasons_bestsellers", 20)
     MIN_SIZE_VOLUME_RISING = s.get("min_reasons_new_products", 10)
+    TRIGGER_MULTIPLIER = s.get("trigger_multiplier", 1.3)
     HIGH_CONFIDENCE_RATIO = s.get("high_confidence_ratio", 3.0)
     MID_CONFIDENCE_RATIO = s.get("mid_confidence_ratio", 2.0)
     QUALITY_HIGH_THRESHOLD = s.get("quality_high_threshold", 0.40)

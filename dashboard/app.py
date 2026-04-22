@@ -109,15 +109,17 @@ if st.session_state.get("show_settings"):
 
         # --- What gets flagged ---
         st.caption("What gets flagged")
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         with c1:
-            s["baseline_percentile"] = st.number_input("Baseline percentile", 0.50, 0.95, float(s["baseline_percentile"]), 0.05, help="Return rate percentile used as 'normal' per category. 0.75 = only worst 25% flagged.")
+            s["trigger_multiplier"] = st.number_input("Trigger multiplier", 1.1, 2.0, float(s.get("trigger_multiplier", 1.3)), 0.1, help="A size is flagged if its return rate is above the category median × this value. 1.3 = 30% above median.")
         with c2:
             s["min_recent_sales_per_size"] = st.number_input("Min sales/size (30d)", 1, 100, int(s["min_recent_sales_per_size"]), help="A size needs this many sales in the last 30 days to be included.")
         with c3:
             s["min_reasons_bestsellers"] = st.number_input("Min returns for reasons", 1, 100, int(s.get("min_reasons_bestsellers", 20)), help="Minimum returns with a reason code before showing the breakdown. Below this: 'not enough data'.")
         with c4:
             s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
+        with c5:
+            s["baseline_percentile"] = st.number_input("Baseline percentile", 0.50, 0.95, float(s["baseline_percentile"]), 0.05, help="Used for deviation calculation and priority scoring. Not used for flagging (trigger multiplier is used instead).")
         # Sync: new products use same min reasons, but lower min sales
         s["new_product_min_sales_per_size"] = max(1, s["min_recent_sales_per_size"] // 2)
         s["min_reasons_new_products"] = max(1, s["min_reasons_bestsellers"] // 2)
@@ -204,7 +206,7 @@ if "computed" not in st.session_state:
         # Option D: weighted median + hybrid trigger per category
         # Weighted median: high-volume sizes define "normal"
         # Trigger = max(median × MULTIPLIER, median + FLOOR_PP)
-        MULTIPLIER = 1.3
+        MULTIPLIER = config.TRIGGER_MULTIPLIER
         FLOOR_PP = 0.05
 
         def weighted_median(g):
