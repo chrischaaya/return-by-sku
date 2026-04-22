@@ -435,3 +435,131 @@ def get_parkpalet_stock() -> list:
     ]
 
     return list(db["ProductStocks"].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_monthly_orders_summary() -> list:
+    """
+    Monthly order totals for the trend chart.
+    No delivery lag applied — shows the full history.
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {
+            "$match": {
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+                "status": {"$in": config.VALID_ORDER_STATUSES},
+            }
+        },
+        {"$unwind": "$lineItems"},
+        {"$match": {"lineItems.skuPrefix": {"$in": hiccup_skus}}},
+        {
+            "$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m", "date": "$createdOn"}},
+                "sold": {"$sum": "$lineItems.quantity"},
+            }
+        },
+        {"$project": {"_id": 0, "month": "$_id", "sold": 1}},
+        {"$sort": {"month": 1}},
+    ]
+    return list(db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_monthly_returns_summary() -> list:
+    """
+    Monthly return totals for the trend chart.
+    Grouped by return createdOn month.
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {"$match": {"salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
+        {"$unwind": "$items"},
+        {
+            "$match": {
+                "items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES},
+                "items.skuPrefix": {"$in": hiccup_skus},
+            }
+        },
+        {
+            "$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m", "date": "$createdOn"}},
+                "returned": {"$sum": "$items.quantity"},
+            }
+        },
+        {"$project": {"_id": 0, "month": "$_id", "returned": 1}},
+        {"$sort": {"month": 1}},
+    ]
+    return list(db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_revenue_by_sku() -> list:
+    """
+    Revenue per skuPrefix converted to USD using the order's exchangeRate.
+    Used for the overview page's monetary columns (GMV, Returned Amount).
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {
+            "$match": {
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+                "status": {"$in": config.VALID_ORDER_STATUSES},
+            }
+        },
+        {"$unwind": "$lineItems"},
+        {"$match": {"lineItems.skuPrefix": {"$in": hiccup_skus}}},
+        {
+            "$group": {
+                "_id": "$lineItems.skuPrefix",
+                "revenue": {
+                    "$sum": {
+                        "$cond": {
+                            "if": {
+                                "$gt": [{"$ifNull": ["$exchangeRate", 0]}, 0]
+                            },
+                            "then": {
+                                "$divide": [
+                                    {
+                                        "$ifNull": [
+                                            "$lineItems.subtotalAfterDiscount",
+                                            0,
+                                        ]
+                                    },
+                                    {"$multiply": ["$exchangeRate", 100]},
+                                ]
+                            },
+                            "else": {
+                                "$divide": [
+                                    {
+                                        "$ifNull": [
+                                            "$lineItems.subtotalAfterDiscount",
+                                            0,
+                                        ]
+                                    },
+                                    100,
+                                ]
+                            },
+                        }
+                    }
+                },
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id",
+                "revenue": {"$round": ["$revenue", 2]},
+            }
+        },
+    ]
+    return list(db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True))
