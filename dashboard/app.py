@@ -251,6 +251,7 @@ else:
                                     s.get("pct_other", 0),
                                     s.get(problematic_col, False),
                                     s.get("parkpalet_stock", 0),
+                                    s.get("sold", 0),
                                 ),
                                 axis=1,
                             )
@@ -286,12 +287,12 @@ else:
                             styled = size_display.style.apply(highlight_problems, axis=1)
                             st.dataframe(styled, use_container_width=True, hide_index=True)
 
-                            # SKU-level summary if pattern is consistent
+                            # SKU-level summary — pass ALL sizes for pattern detection
                             _prob_col = problematic_col if problematic_col in sku_sizes.columns else "is_problematic"
-                            flagged_data = sku_sizes[sku_sizes[_prob_col] == True].apply(
+                            all_size_data = sku_sizes.apply(
                                 lambda s: {
                                     "size": s["size"],
-                                    "is_flagged": True,
+                                    "is_flagged": s.get(_prob_col, False),
                                     "pct_small": s.get("pct_too_small", 0),
                                     "pct_large": s.get("pct_too_large", 0),
                                     "pct_quality": s.get("pct_quality", 0),
@@ -300,6 +301,6 @@ else:
                                 axis=1,
                             ).tolist()
 
-                            summary = sku_summary(flagged_data)
+                            summary = sku_summary(all_size_data)
                             if summary:
                                 st.markdown(f"**Summary:** {summary}")

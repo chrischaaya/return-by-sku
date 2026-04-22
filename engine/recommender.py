@@ -5,8 +5,11 @@ Size-level and SKU-level actions based on return reason patterns + stock levels.
 
 from typing import List
 
-# Stock threshold: if parkpalet stock > this, suggest relabelling
-RELABEL_STOCK_THRESHOLD = 50
+# Relabel conditions: ALL must be met
+RELABEL_STOCK_THRESHOLD = 50       # min stock units
+RELABEL_RETURN_RATE = 0.60         # min return rate for the size
+RELABEL_MIN_SALES = 100            # min sold for confidence
+RELABEL_REASON_RATIO = 3.0         # min ratio of dominant reason
 
 
 def size_action(
@@ -18,6 +21,7 @@ def size_action(
     pct_other: float,
     is_flagged: bool,
     stock: int = 0,
+    sold: int = 0,
 ) -> str:
     if not is_flagged:
         return ""
@@ -30,13 +34,20 @@ def size_action(
         ratio_s = pct_small / max(pct_large, 0.01) if pct_small > 0 else 0
         ratio_l = pct_large / max(pct_small, 0.01) if pct_large > 0 else 0
 
+        # Check relabel conditions: confident + high return rate + high stock + enough sales
+        can_relabel = (
+            stock >= RELABEL_STOCK_THRESHOLD
+            and return_rate >= RELABEL_RETURN_RATE
+            and sold >= RELABEL_MIN_SALES
+        )
+
         if ratio_s >= 3 or (pct_small > 0 and pct_large == 0):
-            if stock >= RELABEL_STOCK_THRESHOLD:
+            if can_relabel:
                 issues.append(f"Runs small. Relabel stock ({stock} units) + size up next batch.")
             else:
                 issues.append("Runs small. Size up next batch.")
         elif ratio_l >= 3 or (pct_large > 0 and pct_small == 0):
-            if stock >= RELABEL_STOCK_THRESHOLD:
+            if can_relabel:
                 issues.append(f"Runs large. Relabel stock ({stock} units) + size down next batch.")
             else:
                 issues.append("Runs large. Size down next batch.")
@@ -49,63 +60,63 @@ def size_action(
 
     # --- Quality axis ---
     if pct_quality >= 0.40:
-        issues.append("Quality issue. Review photos/description + inspect stock.")
-    elif pct_quality >= 0.25:
-        issues.append("Quality concerns. Check listing accuracy.")
+        issues.append("Quality issue. Inspect stock.")
 
-    # --- Other axis ---
-    if pct_other >= 0.40 and sizing_total < 0.20:
-        issues.append("High non-sizing returns. Check customer reviews.")
+    # --- No clear pattern ---
+    if not issues:
+        issues.append("Mixed feedback. Investigate due to high return rate.")
 
-    if issues:
-        return "\n".join(f"• {i}" for i in issues)
-    return f"Above P75 ({p75:.0%}). Investigate."
+    return "\n".join(f"• {i}" for i in issues)
 
 
 def sku_summary(size_actions: List[dict]) -> str:
+    """
+    SKU-level summary. Only generated when feedback is consistent across ALL sizes
+    (not just flagged ones). Looks at the full picture to detect patterns that
+    individual sizes might miss.
+    """
     flagged = [s for s in size_actions if s.get("is_flagged")]
+    all_sizes = size_actions  # includes non-flagged sizes too
+
     if not flagged:
         return ""
 
-    n = len(flagged)
-    avg_small = sum(s.get("pct_small", 0) for s in flagged) / n
-    avg_large = sum(s.get("pct_large", 0) for s in flagged) / n
-    avg_quality = sum(s.get("pct_quality", 0) for s in flagged) / n
+    if not all_sizes:
+        return ""
+
+    n = len(all_sizes)
+    avg_small = sum(s.get("pct_small", 0) for s in all_sizes) / n
+    avg_large = sum(s.get("pct_large", 0) for s in all_sizes) / n
+    avg_quality = sum(s.get("pct_quality", 0) for s in all_sizes) / n
     total_stock = sum(s.get("stock", 0) for s in flagged)
 
     parts = []
 
-    # Grading issue: small sizes say "too large", large sizes say "too small"
-    small_group = [s for s in flagged if s.get("size", "").upper() in {"XXS", "XS", "S"}]
-    large_group = [s for s in flagged if s.get("size", "").upper() in {"XL", "XXL", "2XL", "3XL"}]
-    if small_group and large_group:
-        small_says_large = sum(s.get("pct_large", 0) for s in small_group) / len(small_group)
-        large_says_small = sum(s.get("pct_small", 0) for s in large_group) / len(large_group)
-        if small_says_large > 0.25 and large_says_small > 0.25:
-            parts.append("Grading issue — size increments are off. Audit full size range with supplier.")
+    # Consistent sizing across ALL sizes (not just flagged)
+    ratio_s = avg_small / max(avg_large, 0.01) if avg_small > 0 else 0
+    ratio_l = avg_large / max(avg_small, 0.01) if avg_large > 0 else 0
 
-    # Consistent sizing (<2x mixed, 2-3x likely, >3x confident)
-    if not parts:
-        ratio_s = avg_small / max(avg_large, 0.01) if avg_small > 0 else 0
-        ratio_l = avg_large / max(avg_small, 0.01) if avg_large > 0 else 0
+    # Check if EVERY size leans the same direction (at least 1.5x each)
+    all_lean_small = all(
+        (s.get("pct_small", 0) / max(s.get("pct_large", 0), 0.01) >= 1.5)
+        for s in all_sizes if (s.get("pct_small", 0) + s.get("pct_large", 0)) > 0.1
+    )
+    all_lean_large = all(
+        (s.get("pct_large", 0) / max(s.get("pct_small", 0), 0.01) >= 1.5)
+        for s in all_sizes if (s.get("pct_small", 0) + s.get("pct_large", 0)) > 0.1
+    )
 
-        if ratio_s >= 3 or (avg_small > 0 and avg_large == 0):
-            if total_stock >= RELABEL_STOCK_THRESHOLD:
-                parts.append(f"Runs small across all sizes. Relabel parkpalet stock ({total_stock} units) + revise measurements.")
-            else:
-                parts.append("Runs small across all sizes. Revise measurements for next batch.")
-        elif ratio_l >= 3 or (avg_large > 0 and avg_small == 0):
-            if total_stock >= RELABEL_STOCK_THRESHOLD:
-                parts.append(f"Runs large across all sizes. Relabel parkpalet stock ({total_stock} units) + revise measurements.")
-            else:
-                parts.append("Runs large across all sizes. Revise measurements for next batch.")
-        elif ratio_s >= 2:
-            parts.append("Likely runs small across sizes. Check measurements with supplier.")
-        elif ratio_l >= 2:
-            parts.append("Likely runs large across sizes. Check measurements with supplier.")
+    if ratio_s >= 3 or (avg_small > 0 and avg_large == 0):
+        parts.append("Runs small across all sizes. Revise measurements for next batch.")
+    elif ratio_l >= 3 or (avg_large > 0 and avg_small == 0):
+        parts.append("Runs large across all sizes. Revise measurements for next batch.")
+    elif ratio_s >= 2 and all_lean_small:
+        parts.append("Likely runs small across all sizes. Check measurements with supplier.")
+    elif ratio_l >= 2 and all_lean_large:
+        parts.append("Likely runs large across all sizes. Check measurements with supplier.")
 
     if avg_quality >= 0.30:
-        parts.append("Systematic quality issue. Inspect stock + escalate to supplier.")
+        parts.append("Quality issue across all sizes. Inspect stock.")
 
     if len(parts) > 1:
         return "\n".join(f"• {p}" for p in parts)
