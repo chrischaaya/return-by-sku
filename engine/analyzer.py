@@ -222,25 +222,18 @@ def _compute_sku_level(
     # --- Add first order date ---
     sku_agg = sku_agg.merge(df_first, on="sku_prefix", how="left")
 
-    # --- Category baselines (P75) ---
-    # Only use SKUs with >= 20 units for baseline calculation (avoids noise)
-    baseline_pool = sku_agg[sku_agg["total_sold"] >= 20]
-    baselines = (
-        baseline_pool.groupby("category_l3")["return_rate"]
-        .quantile(config.BASELINE_PERCENTILE)
-        .rename("category_baseline")
-    )
-    # Weighted average: total_returned / total_sold per category
-    cat_totals = baseline_pool.groupby("category_l3").agg(
+    # --- Category baselines (weighted median + hybrid trigger) ---
+    # No minimum sales filter — all SKUs included
+    cat_totals = sku_agg.groupby("category_l3").agg(
         _cat_sold=("total_sold", "sum"), _cat_returned=("total_returned", "sum")
     )
     cat_totals["category_avg"] = cat_totals["_cat_returned"] / cat_totals["_cat_sold"]
     cat_avgs = cat_totals["category_avg"]
-    sku_agg = sku_agg.merge(baselines, on="category_l3", how="left")
+    # category_baseline still used for deviation calculation — use weighted avg
+    sku_agg = sku_agg.merge(cat_avgs.rename("category_baseline"), on="category_l3", how="left")
     sku_agg = sku_agg.merge(cat_avgs, on="category_l3", how="left")
-    global_p75 = baseline_pool["return_rate"].quantile(config.BASELINE_PERCENTILE) if not baseline_pool.empty else 0
-    global_avg = baseline_pool["total_returned"].sum() / baseline_pool["total_sold"].sum() if not baseline_pool.empty else 0
-    sku_agg["category_baseline"] = sku_agg["category_baseline"].fillna(global_p75)
+    global_avg = sku_agg["total_returned"].sum() / sku_agg["total_sold"].sum() if sku_agg["total_sold"].sum() > 0 else 0
+    sku_agg["category_baseline"] = sku_agg["category_baseline"].fillna(global_avg)
     sku_agg["category_avg"] = sku_agg["category_avg"].fillna(global_avg)
 
     # --- Deviation ---

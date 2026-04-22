@@ -199,18 +199,48 @@ if "computed" not in st.session_state:
     df_sku_size = data["df_sku_size"].copy()
 
     if df_sku_size is not None and not df_sku_size.empty:
-        bp = df_sku_size[df_sku_size["sold"] >= 20].copy()
-        sp75 = bp.groupby("category_l3")["return_rate"].quantile(config.BASELINE_PERCENTILE).rename("size_p75")
-        cat_totals = bp.groupby("category_l3").agg(_s=("sold", "sum"), _r=("returned", "sum"))
-        cat_totals["category_avg"] = cat_totals["_r"] / cat_totals["_s"]
-        cat_avg = cat_totals["category_avg"]
-        df_sku_size = df_sku_size.merge(sp75, on="category_l3", how="left")
-        df_sku_size = df_sku_size.merge(cat_avg, on="category_l3", how="left")
-        gp75 = bp["return_rate"].quantile(config.BASELINE_PERCENTILE) if not bp.empty else 0
-        gavg = bp["returned"].sum() / bp["sold"].sum() if not bp.empty and bp["sold"].sum() > 0 else 0
-        df_sku_size["size_p75"] = df_sku_size["size_p75"].fillna(gp75)
-        df_sku_size["category_avg"] = df_sku_size["category_avg"].fillna(gavg)
-        df_sku_size["is_flagged"] = (df_sku_size["return_rate"] > df_sku_size["size_p75"]) & (df_sku_size["sold"] >= config.MIN_RECENT_SALES_PER_SIZE)
+        import numpy as np
+
+        # Option D: weighted median + hybrid trigger per category
+        # Weighted median: high-volume sizes define "normal"
+        # Trigger = max(median × MULTIPLIER, median + FLOOR_PP)
+        MULTIPLIER = 1.3
+        FLOOR_PP = 0.05
+
+        def weighted_median(g):
+            sg = g.sort_values("return_rate")
+            cw = sg["sold"].cumsum()
+            return sg[cw >= sg["sold"].sum() / 2.0].iloc[0]["return_rate"]
+
+        active = df_sku_size[df_sku_size["sold"] > 0]
+        cat_stats = {}
+        for cat, g in active.groupby("category_l3"):
+            wm = weighted_median(g)
+            trigger = max(wm * MULTIPLIER, wm + FLOOR_PP)
+            cat_totals_sold = g["sold"].sum()
+            cat_totals_ret = g["returned"].sum()
+            cat_avg_val = cat_totals_ret / cat_totals_sold if cat_totals_sold > 0 else 0
+            cat_stats[cat] = {"weighted_median": wm, "trigger": trigger, "category_avg": cat_avg_val}
+
+        cat_df = pd.DataFrame(cat_stats).T
+        cat_df.index.name = "category_l3"
+        df_sku_size = df_sku_size.merge(cat_df[["trigger", "category_avg"]], on="category_l3", how="left")
+
+        # Global fallback
+        if not active.empty:
+            g_wm = weighted_median(active)
+            g_trigger = max(g_wm * MULTIPLIER, g_wm + FLOOR_PP)
+            g_avg = active["returned"].sum() / active["sold"].sum()
+        else:
+            g_trigger = 0
+            g_avg = 0
+        df_sku_size["trigger"] = df_sku_size["trigger"].fillna(g_trigger)
+        df_sku_size["category_avg"] = df_sku_size["category_avg"].fillna(g_avg)
+        # Keep size_p75 name for compatibility with render_size_table
+        df_sku_size["size_p75"] = df_sku_size["trigger"]
+
+        # Flag: above trigger + enough recent sales
+        df_sku_size["is_flagged"] = df_sku_size["return_rate"] > df_sku_size["trigger"]
 
         drs = data.get("df_recent_size")
         if drs is not None and not drs.empty:
@@ -222,7 +252,7 @@ if "computed" not in st.session_state:
             df_sku_size["qualifies_size"] = False
 
         df_sku_size["is_problematic"] = df_sku_size["qualifies_size"] & df_sku_size["is_flagged"]
-        df_sku_size["is_flagged_rising"] = (df_sku_size["return_rate"] > df_sku_size["size_p75"]) & (df_sku_size["sold"] >= config.RISING_STAR_MIN_SALES_PER_SIZE)
+        df_sku_size["is_flagged_rising"] = df_sku_size["return_rate"] > df_sku_size["trigger"]
         df_sku_size["qualifies_rising"] = df_sku_size.get("recent_sold", 0) >= config.RISING_STAR_MIN_SALES_PER_SIZE
         df_sku_size["is_problematic_rising"] = df_sku_size["qualifies_rising"] & df_sku_size["is_flagged_rising"]
 
