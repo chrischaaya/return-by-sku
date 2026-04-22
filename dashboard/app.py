@@ -48,7 +48,7 @@ def size_sort_key(s):
 def issue_label(ps, pl, pq, po, has_reasons, reason_count=None):
     if not has_reasons:
         return "Not enough data"
-    low_data = reason_count is not None and reason_count < 30
+    low_data = reason_count is not None and reason_count < 10
     sizing = ps + pl
     if sizing > 0.1:
         rs = ps / max(pl, 0.01) if ps > 0 else 0
@@ -115,9 +115,9 @@ if st.session_state.get("show_settings"):
         c1, c2, c3, c4 = st.columns(4)
         with c1:
             s["baseline_percentile"] = st.slider(
-                "Sensitivity",
+                "Baseline percentile",
                 0.50, 0.95, float(s["baseline_percentile"]), 0.05,
-                help="Percentile used as the normal benchmark. Products above this are flagged.",
+                help="Percentile of category return rates used as 'normal'. P75 = only worst 25% flagged.",
             )
             s["min_recent_sales_per_size"] = st.number_input(
                 "Min sales/size (Bestsellers)", 1, 100, int(s["min_recent_sales_per_size"]),
@@ -201,9 +201,13 @@ if "computed" not in st.session_state:
     if df_sku_size is not None and not df_sku_size.empty:
         bp = df_sku_size[df_sku_size["sold"] >= 20].copy()
         sp75 = bp.groupby("category_l3")["return_rate"].quantile(config.BASELINE_PERCENTILE).rename("size_p75")
+        cat_avg = bp.groupby("category_l3")["return_rate"].mean().rename("category_avg")
         df_sku_size = df_sku_size.merge(sp75, on="category_l3", how="left")
+        df_sku_size = df_sku_size.merge(cat_avg, on="category_l3", how="left")
         gp75 = bp["return_rate"].quantile(config.BASELINE_PERCENTILE) if not bp.empty else 0
+        gavg = bp["return_rate"].mean() if not bp.empty else 0
         df_sku_size["size_p75"] = df_sku_size["size_p75"].fillna(gp75)
+        df_sku_size["category_avg"] = df_sku_size["category_avg"].fillna(gavg)
         df_sku_size["is_flagged"] = (df_sku_size["return_rate"] > df_sku_size["size_p75"]) & (df_sku_size["sold"] >= config.MIN_RECENT_SALES_PER_SIZE)
 
         drs = data.get("df_recent_size")
@@ -349,6 +353,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
     has_img = img_url and isinstance(img_url, str) and img_url.startswith("http")
     n_prob = int(row.get("problematic_sizes_rising" if is_rising else "problematic_sizes", 0))
     baseline = row.get("category_baseline", 0)
+    cat_avg = row.get("category_avg", baseline)
     rate = row.get("return_rate", 0)
 
     with st.container(border=True):
@@ -370,7 +375,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
             st.caption(f"{sku} · {row.get('supplier_name', 'N/A')} · {row.get('category_l3', '')}")
             st.markdown(
                 f'<div class="problem-box">'
-                f'Return rate: <b>{rate:.1%}</b> · Category norm: {baseline:.1%} · '
+                f'Return rate: <b>{rate:.1%}</b> · Category average: {cat_avg:.1%} · '
                 f'<span class="sizes-affected">{n_prob} size{"s" if n_prob != 1 else ""} affected</span>'
                 f'</div>',
                 unsafe_allow_html=True,

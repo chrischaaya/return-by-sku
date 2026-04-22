@@ -230,9 +230,17 @@ def _compute_sku_level(
         .quantile(config.BASELINE_PERCENTILE)
         .rename("category_baseline")
     )
+    cat_avgs = (
+        baseline_pool.groupby("category_l3")["return_rate"]
+        .mean()
+        .rename("category_avg")
+    )
     sku_agg = sku_agg.merge(baselines, on="category_l3", how="left")
+    sku_agg = sku_agg.merge(cat_avgs, on="category_l3", how="left")
     global_p75 = baseline_pool["return_rate"].quantile(config.BASELINE_PERCENTILE) if not baseline_pool.empty else 0
+    global_avg = baseline_pool["return_rate"].mean() if not baseline_pool.empty else 0
     sku_agg["category_baseline"] = sku_agg["category_baseline"].fillna(global_p75)
+    sku_agg["category_avg"] = sku_agg["category_avg"].fillna(global_avg)
 
     # --- Deviation ---
     sku_agg["deviation"] = sku_agg["return_rate"] - sku_agg["category_baseline"]

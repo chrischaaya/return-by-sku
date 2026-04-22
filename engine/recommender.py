@@ -78,7 +78,7 @@ def size_action(
 
     # --- Quality axis ---
     if pct_quality >= 0.40:
-        issues.append("Quality/fit issue — check photos match actual product.")
+        issues.append("Quality issue. Inspect stock.")
 
     # --- No clear pattern ---
     if not issues:
