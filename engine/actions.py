@@ -67,6 +67,13 @@ def dismiss_sku(sku_prefix: str):
         store[sku_prefix]["updatedOn"] = datetime.now(timezone.utc)
 
 
+def revert_waiting(sku_prefix: str):
+    """Revert a waiting-for-fix SKU back to active."""
+    store = _get_store()
+    if sku_prefix in store:
+        del store[sku_prefix]
+
+
 def revert_no_action(sku_prefix: str):
     """Revert a no-action SKU back to active."""
     store = _get_store()
@@ -277,3 +284,179 @@ def _check_new_batch_performance(
 
     new_rate = new_returned / new_sold if new_sold > 0 else 0
     return new_sold, min(new_rate, 1.0)
+
+
+# =====================================================================
+# Test scenarios
+# =====================================================================
+
+def seed_test_scenarios():
+    """
+    Seed session state with test scenarios covering all states.
+
+    Scenarios:
+    1. WAITING — action taken 5 days ago, stock still selling, no depletion yet
+    2. WAITING — action taken 30 days ago, stock depleted but no new inbound yet
+    3. WAITING — action taken 45 days ago, new inbound received but not enough sales yet
+    4. FIXED (improved) — old batch had 35% return, new batch has 12%
+    5. FIXED (not improved) — old batch had 25% return, new batch has 28%
+    6. FIXED (partial) — some sizes evaluated, others pending
+    7. NO_ACTION — marked as no action possible
+    8. DISMISSED — already resolved
+
+    Uses real SKU prefixes from the data so they display correctly.
+    """
+    store = _get_store()
+
+    now = datetime.now(timezone.utc)
+
+    # Pick real SKUs from the existing data (top sellers)
+    # These will show product names and images correctly
+    real_skus = [
+        "MBAJ1ZFU01",  # scenario 1 — waiting, just started
+        "M6GLCY4Q02",  # scenario 2 — waiting, stock depleted
+        "MGTBGRL601",  # scenario 3 — waiting, new inbound but low sales
+        "M6RLJVMH02",  # scenario 4 — FIXED, improved
+        "MGP6D8RJ01",  # scenario 5 — FIXED, not improved
+        "M3HAU69901",  # scenario 6 — FIXED, partial data
+        "ML6TCQKI01",  # scenario 7 — no action
+        "MH5BERYM02",  # scenario 8 — dismissed
+    ]
+
+    # Scenario 1: WAITING — recent action, stock still selling
+    store[real_skus[0]] = {
+        "status": "waiting_for_fix",
+        "actionSummary": "Contacted supplier to review size chart. Adjusted measurements for next production.",
+        "createdOn": now - timedelta(days=5),
+        "updatedOn": now - timedelta(days=5),
+        "stockAtAction": {"S": 515, "M": 1034, "L": 972, "XL": 734},
+        "returnRateAtAction": {"S": 0.19, "M": 0.20, "L": 0.22, "XL": 0.20},
+        "overallRateAtAction": 0.20,
+        "flaggedSizes": ["S", "M", "L", "XL"],
+        "oldStockDepletedOn": {},
+        "newStockFirstSeenOn": {},
+        "newBatchReturnRate": {},
+        "newBatchSales": {},
+        "fixedOn": None,
+    }
+
+    # Scenario 2: WAITING — stock depleted on some sizes, no new inbound
+    store[real_skus[1]] = {
+        "status": "waiting_for_fix",
+        "actionSummary": "Product runs small across all sizes. Sent revised spec sheet to supplier.",
+        "createdOn": now - timedelta(days=30),
+        "updatedOn": now - timedelta(days=10),
+        "stockAtAction": {"M": 200, "L": 150, "XL": 80},
+        "returnRateAtAction": {"M": 0.16, "L": 0.19, "XL": 0.19},
+        "overallRateAtAction": 0.16,
+        "flaggedSizes": ["M", "L", "XL"],
+        "oldStockDepletedOn": {"M": now - timedelta(days=10), "XL": now - timedelta(days=15)},
+        "newStockFirstSeenOn": {},
+        "newBatchReturnRate": {},
+        "newBatchSales": {},
+        "fixedOn": None,
+    }
+
+    # Scenario 3: WAITING — new inbound received but not enough sales yet
+    store[real_skus[2]] = {
+        "status": "waiting_for_fix",
+        "actionSummary": "Quality issue identified. Switched to new fabric supplier.",
+        "createdOn": now - timedelta(days=45),
+        "updatedOn": now - timedelta(days=5),
+        "stockAtAction": {"S": 100, "M": 120, "L": 90},
+        "returnRateAtAction": {"S": 0.23, "M": 0.25, "L": 0.21},
+        "overallRateAtAction": 0.21,
+        "flaggedSizes": ["S", "M", "L"],
+        "oldStockDepletedOn": {"S": now - timedelta(days=20), "M": now - timedelta(days=18), "L": now - timedelta(days=22)},
+        "newStockFirstSeenOn": {"S": now - timedelta(days=8), "M": now - timedelta(days=8)},
+        "newBatchReturnRate": {},
+        "newBatchSales": {"S": 5, "M": 7},
+        "fixedOn": None,
+    }
+
+    # Scenario 4: FIXED — improved (return rate dropped significantly)
+    store[real_skus[3]] = {
+        "status": "fixed",
+        "actionSummary": "Sizing was off — all sizes ran small. Revised measurements with supplier. New batch produced with corrected sizing.",
+        "createdOn": now - timedelta(days=60),
+        "updatedOn": now - timedelta(days=3),
+        "stockAtAction": {"S": 150, "M": 230, "L": 180, "XL": 160, "XS": 80},
+        "returnRateAtAction": {"S": 0.33, "M": 0.33, "L": 0.36, "XL": 0.33, "XS": 0.32},
+        "overallRateAtAction": 0.33,
+        "flaggedSizes": ["S", "M", "L", "XL", "XS"],
+        "oldStockDepletedOn": {
+            "S": now - timedelta(days=25), "M": now - timedelta(days=20),
+            "L": now - timedelta(days=22), "XL": now - timedelta(days=28),
+            "XS": now - timedelta(days=30),
+        },
+        "newStockFirstSeenOn": {
+            "S": now - timedelta(days=18), "M": now - timedelta(days=15),
+            "L": now - timedelta(days=16), "XL": now - timedelta(days=20),
+            "XS": now - timedelta(days=22),
+        },
+        "newBatchReturnRate": {"S": 0.10, "M": 0.08, "L": 0.11, "XL": 0.09, "XS": 0.12},
+        "newBatchSales": {"S": 45, "M": 68, "L": 52, "XL": 38, "XS": 25},
+        "fixedOn": now - timedelta(days=3),
+    }
+
+    # Scenario 5: FIXED — not improved
+    store[real_skus[4]] = {
+        "status": "fixed",
+        "actionSummary": "Updated product photos and description to better reflect actual fit.",
+        "createdOn": now - timedelta(days=50),
+        "updatedOn": now - timedelta(days=2),
+        "stockAtAction": {"S": 80, "M": 100, "L": 70},
+        "returnRateAtAction": {"S": 0.25, "M": 0.28, "L": 0.30},
+        "overallRateAtAction": 0.29,
+        "flaggedSizes": ["S", "M", "L"],
+        "oldStockDepletedOn": {
+            "S": now - timedelta(days=20), "M": now - timedelta(days=18),
+            "L": now - timedelta(days=22),
+        },
+        "newStockFirstSeenOn": {
+            "S": now - timedelta(days=15), "M": now - timedelta(days=14),
+            "L": now - timedelta(days=16),
+        },
+        "newBatchReturnRate": {"S": 0.27, "M": 0.31, "L": 0.28},
+        "newBatchSales": {"S": 30, "M": 42, "L": 28},
+        "fixedOn": now - timedelta(days=2),
+    }
+
+    # Scenario 6: FIXED — partial (some sizes evaluated, L still pending)
+    store[real_skus[5]] = {
+        "status": "fixed",
+        "actionSummary": "Inconsistent sizing across size range. Sent full measurement audit to supplier.",
+        "createdOn": now - timedelta(days=40),
+        "updatedOn": now - timedelta(days=1),
+        "stockAtAction": {"S": 60, "M": 90, "L": 110, "XL": 50},
+        "returnRateAtAction": {"S": 0.23, "M": 0.25, "L": 0.26, "XL": 0.20},
+        "overallRateAtAction": 0.25,
+        "flaggedSizes": ["S", "M", "L", "XL"],
+        "oldStockDepletedOn": {
+            "S": now - timedelta(days=18), "M": now - timedelta(days=15),
+            "XL": now - timedelta(days=20),
+        },
+        "newStockFirstSeenOn": {
+            "S": now - timedelta(days=12), "M": now - timedelta(days=10),
+            "XL": now - timedelta(days=14),
+        },
+        "newBatchReturnRate": {"S": 0.14, "M": 0.12, "XL": 0.11},
+        "newBatchSales": {"S": 22, "M": 35, "XL": 18},
+        "fixedOn": now - timedelta(days=1),
+    }
+
+    # Scenario 7: NO ACTION
+    store[real_skus[6]] = {
+        "status": "no_action",
+        "createdOn": now - timedelta(days=10),
+        "updatedOn": now - timedelta(days=10),
+    }
+
+    # Scenario 8: DISMISSED
+    store[real_skus[7]] = {
+        "status": "dismissed",
+        "actionSummary": "Sizing corrected in previous batch. Return rate normalized.",
+        "createdOn": now - timedelta(days=90),
+        "updatedOn": now - timedelta(days=5),
+        "fixedOn": now - timedelta(days=10),
+    }
