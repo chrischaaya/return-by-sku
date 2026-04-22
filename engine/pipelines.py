@@ -35,8 +35,9 @@ def _cutoff_slow() -> datetime:
 
 def get_hiccup_sku_prefixes() -> list:
     """
-    Fetch all skuPrefixes from Products where merchantKey = hiccup.
-    This is the source of truth for 'is this a hiccup product'.
+    Fetch all skuPrefixes from Products where merchantKey = hiccup,
+    excluding variants delisted for known-bad reasons (poor feedback,
+    high returns, poor performance, being recreated).
     Cached in module-level variable.
     """
     global _hiccup_sku_prefixes
@@ -44,13 +45,35 @@ def get_hiccup_sku_prefixes() -> list:
         return _hiccup_sku_prefixes
 
     db = get_db()
+
+    # Get all hiccup skuPrefixes
     pipeline = [
         {"$match": {"merchantKey": config.MERCHANT_KEY}},
         {"$unwind": "$productVariants"},
         {"$group": {"_id": None, "prefixes": {"$addToSet": "$productVariants.skuPrefix"}}},
     ]
     result = list(db[config.COLL_PRODUCTS].aggregate(pipeline))
-    _hiccup_sku_prefixes = result[0]["prefixes"] if result else []
+    all_prefixes = set(result[0]["prefixes"]) if result else set()
+
+    # Get delisted skuPrefixes to exclude
+    delisted_pipeline = [
+        {"$match": {"merchantKey": config.MERCHANT_KEY}},
+        {"$unwind": "$productVariants"},
+        {
+            "$match": {
+                "productVariants.reorder.delistedUntil": {"$exists": True},
+                "productVariants.reorder.delistedReason": {
+                    "$regex": "poor customer|poor performance|high return|low performance|low customer|never see you|new sku|new product|new variant|re-created|to be created|will be created|being created",
+                    "$options": "i",
+                },
+            }
+        },
+        {"$group": {"_id": None, "prefixes": {"$addToSet": "$productVariants.skuPrefix"}}},
+    ]
+    delisted_result = list(db[config.COLL_PRODUCTS].aggregate(delisted_pipeline))
+    delisted_prefixes = set(delisted_result[0]["prefixes"]) if delisted_result else set()
+
+    _hiccup_sku_prefixes = list(all_prefixes - delisted_prefixes)
     return _hiccup_sku_prefixes
 
 
