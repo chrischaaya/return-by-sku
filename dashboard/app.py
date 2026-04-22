@@ -56,50 +56,64 @@ if data is None:
     st.info("Click 'Update Data' to load the dashboard.")
     st.stop()
 
-df_sku = data["df_sku"]
-df_sku_size = data["df_sku_size"]
+# --- Compute P75 flagging (once, cached in session state) ---
+if "computed" not in st.session_state or should_update:
+    df_sku = data["df_sku"].copy()
+    df_sku_size = data["df_sku_size"].copy()
 
-# --- Compute size-level P75 and flag problematic sizes ---
-if df_sku_size is not None and not df_sku_size.empty:
-    baseline_pool = df_sku_size[df_sku_size["sold"] >= 20].copy()
-    size_p75 = baseline_pool.groupby("category_l3")["return_rate"].quantile(config.BASELINE_PERCENTILE).rename("size_p75")
-    df_sku_size = df_sku_size.merge(size_p75, on="category_l3", how="left")
-    global_p75 = baseline_pool["return_rate"].quantile(config.BASELINE_PERCENTILE) if not baseline_pool.empty else 0
-    df_sku_size["size_p75"] = df_sku_size["size_p75"].fillna(global_p75)
-    df_sku_size["is_flagged"] = (
-        (df_sku_size["return_rate"] > df_sku_size["size_p75"])
-        & (df_sku_size["sold"] >= config.MIN_RECENT_SALES_PER_SIZE)
-    )
-
-    df_recent_size = data.get("df_recent_size")
-    if df_recent_size is not None and not df_recent_size.empty:
-        df_sku_size = df_sku_size.merge(
-            df_recent_size[["sku_prefix", "size", "recent_sold"]],
-            on=["sku_prefix", "size"],
-            how="left",
+    if df_sku_size is not None and not df_sku_size.empty:
+        baseline_pool = df_sku_size[df_sku_size["sold"] >= 20].copy()
+        size_p75 = baseline_pool.groupby("category_l3")["return_rate"].quantile(config.BASELINE_PERCENTILE).rename("size_p75")
+        df_sku_size = df_sku_size.merge(size_p75, on="category_l3", how="left")
+        global_p75 = baseline_pool["return_rate"].quantile(config.BASELINE_PERCENTILE) if not baseline_pool.empty else 0
+        df_sku_size["size_p75"] = df_sku_size["size_p75"].fillna(global_p75)
+        df_sku_size["is_flagged"] = (
+            (df_sku_size["return_rate"] > df_sku_size["size_p75"])
+            & (df_sku_size["sold"] >= config.MIN_RECENT_SALES_PER_SIZE)
         )
-        df_sku_size["recent_sold"] = df_sku_size["recent_sold"].fillna(0).astype(int)
-        df_sku_size["qualifies_size"] = df_sku_size["recent_sold"] >= config.MIN_RECENT_SALES_PER_SIZE
-    else:
-        df_sku_size["recent_sold"] = 0
-        df_sku_size["qualifies_size"] = False
 
-    df_sku_size["is_problematic"] = df_sku_size["qualifies_size"] & df_sku_size["is_flagged"]
+        df_recent_size = data.get("df_recent_size")
+        if df_recent_size is not None and not df_recent_size.empty:
+            df_sku_size = df_sku_size.merge(
+                df_recent_size[["sku_prefix", "size", "recent_sold"]],
+                on=["sku_prefix", "size"],
+                how="left",
+            )
+            df_sku_size["recent_sold"] = df_sku_size["recent_sold"].fillna(0).astype(int)
+            df_sku_size["qualifies_size"] = df_sku_size["recent_sold"] >= config.MIN_RECENT_SALES_PER_SIZE
+        else:
+            df_sku_size["recent_sold"] = 0
+            df_sku_size["qualifies_size"] = False
 
-    problem_counts = (
-        df_sku_size[df_sku_size["is_problematic"]]
-        .groupby("sku_prefix")["size"]
-        .count()
-        .rename("problematic_sizes")
-    )
-    df_sku = df_sku.drop(columns=["problematic_sizes"], errors="ignore")
-    df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
-    df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
+        df_sku_size["is_problematic"] = df_sku_size["qualifies_size"] & df_sku_size["is_flagged"]
 
-# --- Split into bestsellers vs rising stars (mutually exclusive) ---
-all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
-rising_stars = all_flagged[all_flagged["is_rising_star"] == True]
-bestsellers = all_flagged[~all_flagged["sku_prefix"].isin(rising_stars["sku_prefix"])]
+        problem_counts = (
+            df_sku_size[df_sku_size["is_problematic"]]
+            .groupby("sku_prefix")["size"]
+            .count()
+            .rename("problematic_sizes")
+        )
+        df_sku = df_sku.drop(columns=["problematic_sizes"], errors="ignore")
+        df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
+        df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
+
+    # Split into bestsellers vs rising stars
+    all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
+    rising_stars = all_flagged[all_flagged["is_rising_star"] == True]
+    bestsellers = all_flagged[~all_flagged["sku_prefix"].isin(rising_stars["sku_prefix"])]
+
+    st.session_state["computed"] = {
+        "df_sku": df_sku,
+        "df_sku_size": df_sku_size,
+        "bestsellers": bestsellers,
+        "rising_stars": rising_stars,
+    }
+
+computed = st.session_state["computed"]
+df_sku = computed["df_sku"]
+df_sku_size = computed["df_sku_size"]
+bestsellers = computed["bestsellers"]
+rising_stars = computed["rising_stars"]
 
 # --- View selector ---
 view = st.radio(

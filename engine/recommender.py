@@ -63,8 +63,10 @@ def size_action(
     if pct_other >= 0.40 and sizing_total < 0.20:
         issues.append(f"High other returns ({pct_other:.0%}). Check customer reviews.")
 
+    if len(issues) > 1:
+        return "\n".join(f"• {i}" for i in issues)
     if issues:
-        return " | ".join(issues)
+        return issues[0]
     return f"Above P75 ({p75:.0%}). Investigate."
 
 
@@ -93,7 +95,9 @@ def sku_summary(size_actions: List[dict]) -> str:
         large_says_small = sum(s.get("pct_small", 0) for s in large_group) / len(large_group)
         if small_says_large > 0.25 and large_says_small > 0.25:
             parts.append("Grading issue — size increments are off. Audit full size range with supplier.")
-            return " | ".join(parts)
+            if len(parts) > 1:
+        return "\n".join(f"• {p}" for p in parts)
+    return parts[0] if parts else ""
 
     # Consistent sizing direction across all sizes
     if avg_small > 0 and (avg_large == 0 or avg_small / max(avg_large, 0.01) >= 3):
@@ -110,4 +114,6 @@ def sku_summary(size_actions: List[dict]) -> str:
     if avg_quality >= 0.30:
         parts.append("Systematic quality issue. Inspect stock + escalate to supplier.")
 
-    return " | ".join(parts)
+    if len(parts) > 1:
+        return "\n".join(f"• {p}" for p in parts)
+    return parts[0] if parts else ""
