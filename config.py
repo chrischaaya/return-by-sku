@@ -1,11 +1,11 @@
 """
 Central configuration for the Return Rate Dashboard.
-All thresholds, connection details, and business rules in one place.
+Static values that don't change + dynamic settings loaded from MongoDB.
 """
 
-# --- MongoDB Connection ---
 import streamlit as st
 
+# --- MongoDB Connection ---
 MONGO_URI = st.secrets["MONGO_URI"]
 MONGO_DB = "hiccup-app"
 
@@ -17,78 +17,43 @@ COLL_RETURN_REASONS = "ReturnReasons"
 COLL_CATEGORIES = "Categories"
 COLL_SALES_CHANNELS = "SalesChannels"
 
-# --- Data Filters ---
-# Only include items with these statuses from CustomerReturns.items
+# --- Static values (never change) ---
 VALID_RETURN_ITEM_STATUSES = ["ACCEPTED", "PENDING", "REJECTED"]
-
-# Only analyze products owned by Lykia (merchantKey = "hiccup")
 MERCHANT_KEY = "hiccup"
-
-# Channels to exclude from all analysis
-EXCLUDED_CHANNELS = ["aboutYou", "vogaCloset"]
-
-# Order statuses that count as "sold"
 VALID_ORDER_STATUSES = ["DISPATCHED", "DELIVERED", "PROCESSING"]
-
-# Days of recent orders to exclude (delivery lag — customers can't return yet)
-# Trendyol and Hepsiburada deliver faster
 FAST_DELIVERY_CHANNELS = ["trendyol", "hepsiburada"]
-FAST_DELIVERY_LAG_DAYS = 7
-SLOW_DELIVERY_LAG_DAYS = 14
 
-# Rising stars: SKUs first seen in orders within this many days
-RISING_STAR_MAX_AGE_DAYS = 45
-
-# --- Time Window ---
-DEFAULT_LOOKBACK_DAYS = 90
-
-# --- Volume Thresholds ---
-# Minimum units sold per size for size-level flagging
-MIN_SIZE_VOLUME = 20
-
-# Top N SKUs by recent sales for recovering/trend analysis
-TOP_SKU_FOR_TRENDS = 300
-
-# --- Anomaly Detection ---
-# Category baseline percentile — SKUs above this are flagged
-# P75 = only the worst 25% in each category
-BASELINE_PERCENTILE = 0.75
-
-# Size concentration index: if the worst size's return rate is this many times
-# the SKU average, it's a sizing problem
-SIZE_CONCENTRATION_THRESHOLD = 1.5
-
-# If a single return reason accounts for more than this share, it's actionable
-REASON_CONCENTRATION_THRESHOLD = 0.40
-
-# --- Dashboard ---
-# Min sales per size in last 30 days for a SKU to qualify
-MIN_RECENT_SALES_PER_SIZE = 10
-
-# Rising stars: lower threshold for early detection
-RISING_STAR_MIN_SALES_PER_SIZE = 5
-
-# For trend/evolution: compare current period vs this many days prior
-TREND_COMPARISON_DAYS = 30
-
-# --- Channels with Return Reason Data ---
-# Full: reliable reason codes on most returns
-# Partial: some returns have reasons, many don't
-# None: no usable reason data
-CHANNELS_WITH_FULL_REASONS = [
-    "trendyol", "fashiondays", "fashiondaysBG",
-    "hepsiburada", "emag", "trendyolRO",
-]
-CHANNELS_WITH_PARTIAL_REASONS = ["hiccup"]
-CHANNELS_WITHOUT_REASONS = [
-    "namshi", "debenhams", "tiktokShop",
-    "amazonUS", "amazonUK", "allegro",
-    "emagBG", "emagHU",
-]
-
-# --- Return Reason Codes (from ReturnReasons collection) ---
 SIZING_REASONS = ["TOO_LARGE", "TOO_SMALL"]
 QUALITY_REASONS = ["DEFECTIVE_PRODUCT", "EXPECTATION_MISMATCH"]
-LISTING_REASONS = []  # folded into QUALITY
 LOGISTICS_REASONS = ["NOT_DELIVERED", "DELIVERY_ISSUE", "WRONG_PRODUCT"]
 NEUTRAL_REASONS = ["NO_LONGER_WANTED", "SURPLUS_PRODUCT", "OTHER"]
+
+# --- Dynamic settings (loaded from MongoDB, editable in UI) ---
+# These are defaults — overridden by engine.settings.load_settings()
+from engine.settings import load_settings as _load
+
+_s = _load()
+BASELINE_PERCENTILE = _s["baseline_percentile"]
+MIN_RECENT_SALES_PER_SIZE = _s["min_recent_sales_per_size"]
+RISING_STAR_MIN_SALES_PER_SIZE = _s["rising_star_min_sales_per_size"]
+RISING_STAR_MAX_AGE_DAYS = _s["rising_star_max_age_days"]
+FAST_DELIVERY_LAG_DAYS = _s["fast_delivery_lag_days"]
+SLOW_DELIVERY_LAG_DAYS = _s["slow_delivery_lag_days"]
+MIN_SIZE_VOLUME = _s["min_size_volume"]
+EXCLUDED_CHANNELS = _s["excluded_channels"]
+
+
+def reload_settings():
+    """Reload settings from MongoDB and update module-level variables."""
+    global BASELINE_PERCENTILE, MIN_RECENT_SALES_PER_SIZE, RISING_STAR_MIN_SALES_PER_SIZE
+    global RISING_STAR_MAX_AGE_DAYS, FAST_DELIVERY_LAG_DAYS, SLOW_DELIVERY_LAG_DAYS
+    global MIN_SIZE_VOLUME, EXCLUDED_CHANNELS
+    s = _load()
+    BASELINE_PERCENTILE = s["baseline_percentile"]
+    MIN_RECENT_SALES_PER_SIZE = s["min_recent_sales_per_size"]
+    RISING_STAR_MIN_SALES_PER_SIZE = s["rising_star_min_sales_per_size"]
+    RISING_STAR_MAX_AGE_DAYS = s["rising_star_max_age_days"]
+    FAST_DELIVERY_LAG_DAYS = s["fast_delivery_lag_days"]
+    SLOW_DELIVERY_LAG_DAYS = s["slow_delivery_lag_days"]
+    MIN_SIZE_VOLUME = s["min_size_volume"]
+    EXCLUDED_CHANNELS = s["excluded_channels"]
