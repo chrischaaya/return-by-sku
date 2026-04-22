@@ -206,6 +206,9 @@ else:
 
                             is_problematic = sku_sizes["is_problematic"].values
 
+                            if "parkpalet_stock" not in sku_sizes.columns:
+                                sku_sizes["parkpalet_stock"] = 0
+
                             size_display = sku_sizes[[
                                 "size", "sold", "return_rate",
                                 "pct_too_small", "pct_too_large", "pct_quality", "pct_other",
