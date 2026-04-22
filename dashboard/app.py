@@ -1,5 +1,5 @@
 """
-Return Rate Dashboard — main Streamlit entry point.
+Return Investigation Tool — main Streamlit entry point.
 """
 
 import sys
@@ -19,7 +19,7 @@ st.set_page_config(
 
 import config
 from engine.analyzer import load_data
-from engine.ai_recommender import generate_all_recommendations
+from engine.recommender import size_action, sku_summary
 
 # --- Size ordering ---
 SIZE_ORDER = [
@@ -37,52 +37,17 @@ def size_sort_key(size):
         return 999
 
 
-def size_action(return_rate, p75, pct_small, pct_large, pct_quality, pct_other, is_flagged):
-    """
-    Two separate axes:
-    1. Sizing: compare too small vs too large. If one is 3x+ the other, it's clear direction.
-    2. Quality/other: evaluated independently from sizing.
-    """
-    if not is_flagged:
-        return ""
-
-    issues = []
-
-    # --- Sizing axis ---
-    sizing_total = pct_small + pct_large
-    if sizing_total > 0.1:
-        if pct_small > 0 and (pct_large == 0 or pct_small / max(pct_large, 0.01) >= 3):
-            issues.append(f"Runs small ({pct_small:.0%}). Size up or add 'order one size up'.")
-        elif pct_large > 0 and (pct_small == 0 or pct_large / max(pct_small, 0.01) >= 3):
-            issues.append(f"Runs large ({pct_large:.0%}). Size down or add 'order one size down'.")
-        elif pct_small >= 0.15 and pct_large >= 0.15:
-            issues.append(f"Inconsistent sizing ({pct_small:.0%} small, {pct_large:.0%} large). Review size chart.")
-
-    # --- Quality/other axis (independent) ---
-    if pct_quality >= 0.25:
-        issues.append(f"Quality/expectation issue ({pct_quality:.0%}). Review photos, description, fabric.")
-    if pct_other >= 0.40 and sizing_total < 0.2:
-        issues.append(f"High 'other' returns ({pct_other:.0%}). Check customer reviews.")
-
-    if issues:
-        return " | ".join(issues)
-    return f"Above P75 ({p75:.0%}). Investigate."
-
-
 # --- Header ---
-h1, h2, h3 = st.columns([4, 1, 1])
+h1, h2 = st.columns([4, 1])
 with h1:
     st.title("Return Investigation Tool")
 with h2:
     should_update = st.button("Update Data", use_container_width=True)
-with h3:
-    should_gen_ai = st.button("Generate AI Recs", use_container_width=True)
 
 # --- Load / refresh data ---
 if should_update or "data" not in st.session_state:
     with st.spinner("Loading data from MongoDB..."):
         st.session_state["data"] = load_data()
-        st.session_state.pop("ai_recs", None)
     st.toast("Data loaded!")
 
 data = st.session_state.get("data")
@@ -131,13 +96,6 @@ if df_sku_size is not None and not df_sku_size.empty:
     df_sku = df_sku.merge(problem_counts, on="sku_prefix", how="left")
     df_sku["problematic_sizes"] = df_sku["problematic_sizes"].fillna(0).astype(int)
 
-# --- Generate AI recommendations (only on button click) ---
-if should_gen_ai:
-    with st.spinner("Generating AI recommendations... (~20 seconds)"):
-        ai_recs = generate_all_recommendations(df_sku, df_sku_size)
-        st.session_state["ai_recs"] = ai_recs
-    st.toast("AI recommendations generated!")
-
 # --- Split into bestsellers vs rising stars (mutually exclusive) ---
 all_flagged = df_sku[df_sku["problematic_sizes"] > 0].copy()
 rising_stars = all_flagged[all_flagged["is_rising_star"] == True]
@@ -164,15 +122,14 @@ with f3:
 if "Bestsellers" in view:
     display = bestsellers.sort_values("recent_sold", ascending=False)
     st.caption(
-        f"SKUs with at least one size with ≥{config.MIN_RECENT_SALES_PER_SIZE} sales in last 30 days "
-        f"and return rate above category P75. Excludes products launched in last {config.RISING_STAR_MAX_AGE_DAYS} days. "
+        f"SKUs with ≥{config.MIN_RECENT_SALES_PER_SIZE} sales/size in last 30 days "
+        f"and return rate above category P75. Sorted by sales. "
         f"{len(display)} SKUs."
     )
 else:
     display = rising_stars.sort_values("recent_sold", ascending=False)
     st.caption(
-        f"Products launched in last {config.RISING_STAR_MAX_AGE_DAYS} days with at least one size "
-        f"with ≥{config.MIN_RECENT_SALES_PER_SIZE} sales in last 30 days and return rate above category P75. "
+        f"Launched in last {config.RISING_STAR_MAX_AGE_DAYS} days with problematic sizes. "
         f"{len(display)} SKUs."
     )
 
@@ -200,6 +157,7 @@ else:
         has_img = img_url and isinstance(img_url, str) and img_url.startswith("http")
         n_problems = int(row.get("problematic_sizes", 0))
 
+        # --- Collapsed row ---
         col_img, col_info = st.columns([1, 11])
         with col_img:
             if has_img:
@@ -211,6 +169,7 @@ else:
                 f"**{n_problems} problematic size{'s' if n_problems != 1 else ''}**",
                 expanded=False,
             ):
+                # --- Expanded: image + size table ---
                 if df_sku_size is not None and not df_sku_size.empty:
                     sku_sizes = df_sku_size[df_sku_size["sku_prefix"] == row["sku_prefix"]].copy()
 
@@ -231,6 +190,7 @@ else:
 
                             p75_val = sku_sizes["size_p75"].iloc[0] if "size_p75" in sku_sizes.columns else 0
 
+                            # Generate actions
                             sku_sizes["action"] = sku_sizes.apply(
                                 lambda s: size_action(
                                     s["return_rate"], p75_val,
@@ -239,16 +199,18 @@ else:
                                     s.get("pct_quality", 0),
                                     s.get("pct_other", 0),
                                     s.get("is_problematic", False),
+                                    s.get("parkpalet_stock", 0),
                                 ),
                                 axis=1,
                             )
 
+                            is_problematic = sku_sizes["is_problematic"].values
+
                             size_display = sku_sizes[[
                                 "size", "sold", "return_rate",
-                                "pct_too_small", "pct_too_large", "pct_quality", "pct_other", "action"
+                                "pct_too_small", "pct_too_large", "pct_quality", "pct_other",
+                                "parkpalet_stock", "action"
                             ]].copy()
-
-                            is_problematic = sku_sizes["is_problematic"].values
 
                             size_display["return_rate"] = size_display["return_rate"].apply(lambda x: f"{x:.1%}")
                             size_display["pct_too_small"] = size_display["pct_too_small"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
@@ -257,7 +219,8 @@ else:
                             size_display["pct_other"] = size_display["pct_other"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
                             size_display.columns = [
                                 "Size", "Sold", "Return Rate",
-                                "% Too Small", "% Too Large", "% Quality", "% Other", "Action"
+                                "% Too Small", "% Too Large", "% Quality", "% Other",
+                                "Stock", "Action"
                             ]
 
                             def highlight_problems(row_df):
@@ -269,8 +232,19 @@ else:
                             styled = size_display.style.apply(highlight_problems, axis=1)
                             st.dataframe(styled, use_container_width=True, hide_index=True)
 
-                        # AI recommendation
-                        ai_recs = st.session_state.get("ai_recs", {})
-                        rec = ai_recs.get(row["sku_prefix"], "")
-                        if rec:
-                            st.markdown(f"**Recommendation:** {rec}")
+                            # SKU-level summary if pattern is consistent
+                            flagged_data = sku_sizes[sku_sizes["is_problematic"] == True].apply(
+                                lambda s: {
+                                    "size": s["size"],
+                                    "is_flagged": True,
+                                    "pct_small": s.get("pct_too_small", 0),
+                                    "pct_large": s.get("pct_too_large", 0),
+                                    "pct_quality": s.get("pct_quality", 0),
+                                    "stock": s.get("parkpalet_stock", 0),
+                                },
+                                axis=1,
+                            ).tolist()
+
+                            summary = sku_summary(flagged_data)
+                            if summary:
+                                st.markdown(f"**Summary:** {summary}")

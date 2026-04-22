@@ -420,3 +420,41 @@ def get_product_metadata() -> list:
     ]
 
     return list(db[config.COLL_PRODUCTS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_parkpalet_stock() -> list:
+    """
+    Parkpalet warehouse stock at (skuPrefix, size) level.
+    Only hiccup products with available > 0.
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {
+            "$match": {
+                "providerKey": "parkpalet",
+                "merchantKey": config.MERCHANT_KEY,
+                "available": {"$gt": 0},
+                "skuPrefix": {"$in": hiccup_skus},
+            }
+        },
+        {
+            "$group": {
+                "_id": {"skuPrefix": "$skuPrefix", "size": "$size"},
+                "stock": {"$sum": "$available"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id.skuPrefix",
+                "size": "$_id.size",
+                "parkpalet_stock": "$stock",
+            }
+        },
+    ]
+
+    return list(db["ProductStocks"].aggregate(pipeline, allowDiskUse=True))

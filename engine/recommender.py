@@ -1,180 +1,113 @@
 """
-Recommendation engine.
-Translates analysis results into plain-English actions.
-Every flagged item gets a recommendation — never just "investigate".
+Predetermined recommendation engine.
+Size-level and SKU-level actions based on return reason patterns + stock levels.
 """
 
-from typing import Dict, List, Optional
+from typing import List
 
 import config
 
-
-def generate_sku_recommendation(row: dict) -> str:
-    """Generate a recommendation for a single SKU row from df_sku."""
-    rate = row.get("return_rate", 0)
-    baseline = row.get("category_baseline", 0)
-    problem = row.get("problem_type", "UNKNOWN")
-    top_reason = row.get("top_reason")
-    reason_pct = row.get("top_reason_pct", 0)
-    supplier = row.get("supplier_name", "Unknown")
-    anomaly_sizes = row.get("anomaly_sizes", [])
-    has_reasons = row.get("has_reason_data", False)
-
-    rate_pct = f"{rate:.0%}"
-    baseline_pct = f"{baseline:.0%}"
-    anomaly_size_names = [s["size"] for s in anomaly_sizes] if anomaly_sizes else []
-
-    # --- Sizing: runs small ---
-    if problem == "SIZING" and _is_small_size_issue(anomaly_sizes, top_reason):
-        sizes_str = ", ".join(anomaly_size_names) if anomaly_size_names else "smaller sizes"
-        return (
-            f"Sizing issue — product likely runs small. "
-            f"Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"Sizes {sizes_str} have significantly higher returns. "
-            f"Action: review the spec sheet and actual measurements for this SKU. "
-            f"Consider adding 'runs small — order one size up' to the listing, "
-            f"or adjust measurements with supplier {supplier} for next production."
-        )
-
-    # --- Sizing: runs large ---
-    if problem == "SIZING" and _is_large_size_issue(anomaly_sizes, top_reason):
-        sizes_str = ", ".join(anomaly_size_names) if anomaly_size_names else "larger sizes"
-        return (
-            f"Sizing issue — product likely runs large. "
-            f"Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"Sizes {sizes_str} have significantly higher returns. "
-            f"Action: review the spec sheet. Consider adding 'runs large — order one size down' "
-            f"to the listing, or tighten measurements with supplier {supplier}."
-        )
-
-    # --- Sizing: general ---
-    if problem == "SIZING":
-        sizes_str = ", ".join(anomaly_size_names) if anomaly_size_names else "multiple sizes"
-        return (
-            f"Sizing inconsistency detected. Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"Return rates vary significantly across sizes ({sizes_str} are worst). "
-            f"Action: check measurement consistency across the full size range with supplier {supplier}. "
-            f"The size grading (increments between sizes) may be off."
-        )
-
-    # --- Quality ---
-    if problem == "QUALITY":
-        return (
-            f"Quality issue suspected. Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"{_reason_detail(top_reason, reason_pct)} "
-            f"Action: pull a sample from current stock and inspect for defects. "
-            f"If confirmed, raise with supplier {supplier} immediately. "
-            f"Consider holding remaining stock until quality is verified."
-        )
-
-    # --- Listing mismatch ---
-    if problem == "LISTING":
-        return (
-            f"Listing mismatch suspected. Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"{_reason_detail(top_reason, reason_pct)} "
-            f"Action: compare product listing photos against the actual product. "
-            f"Check: does the color look accurate? Do photos show the true fit and fabric? "
-            f"Is the description accurate about material, thickness, and stretch? Update where needed."
-        )
-
-    # --- No reason data available ---
-    if not has_reasons:
-        return (
-            f"Return rate is {rate_pct} vs category avg {baseline_pct}. "
-            f"No return reason data available for this channel. "
-            f"Action: review the product page and any customer feedback. "
-            f"Check sizing chart accuracy and photo quality."
-        )
-
-    # --- Fallback: high returns, no clear cause ---
-    return (
-        f"Return rate is {rate_pct} vs category avg {baseline_pct}. "
-        f"No single dominant cause identified. "
-        f"{_reason_detail(top_reason, reason_pct) if has_reasons else ''} "
-        f"Action: manual review needed. Check: (1) customer reviews for specific complaints, "
-        f"(2) whether product is priced right for its quality, "
-        f"(3) whether this product is promoted on channels where fit expectations differ."
-    )
+# Stock threshold: if parkpalet stock > this, suggest relabelling
+RELABEL_STOCK_THRESHOLD = 50
 
 
-def generate_supplier_recommendation(row: dict) -> str:
-    """Generate a recommendation for a supplier row from df_supplier."""
-    rate = row.get("return_rate", 0)
-    total_skus = row.get("total_skus", 0)
-    flagged = row.get("flagged_skus", 0)
-    worst_cat = row.get("worst_category", "unknown")
-    name = row.get("supplier_name", "Unknown")
-    top_reason = row.get("top_reason")
-
-    rate_pct = f"{rate:.0%}"
-
-    if flagged == 0:
-        return f"No flagged SKUs. Overall return rate {rate_pct}. No action needed."
-
-    if flagged >= 3 and top_reason in config.SIZING_REASONS:
-        return (
-            f"{flagged} of {total_skus} SKUs flagged. Overall return rate {rate_pct}. "
-            f"Worst category: {worst_cat}. Primary issue: sizing. "
-            f"Action: schedule a supplier review — sizing standards need audit across "
-            f"multiple products. Request a measurement check for all active SKUs."
-        )
-
-    if flagged >= 3 and top_reason in config.QUALITY_REASONS:
-        return (
-            f"{flagged} of {total_skus} SKUs flagged. Overall return rate {rate_pct}. "
-            f"Worst category: {worst_cat}. Primary issue: product defects. "
-            f"Action: raise quality concern with {name}. Request factory inspection "
-            f"or tighter QC process. Consider holding new orders until resolved."
-        )
-
-    if flagged >= 3:
-        return (
-            f"{flagged} of {total_skus} SKUs flagged. Overall return rate {rate_pct}. "
-            f"Worst category: {worst_cat}. "
-            f"Action: schedule a supplier review meeting with {name}. "
-            f"Bring the SKU-level breakdown and request a corrective action plan."
-        )
-
-    return (
-        f"{flagged} of {total_skus} SKUs above threshold. Return rate {rate_pct}. "
-        f"Worst category: {worst_cat}. Monitor — not yet a systemic pattern."
-    )
-
-
-def _is_small_size_issue(anomaly_sizes: List[dict], top_reason: Optional[str]) -> bool:
-    small_sizes = {"XXS", "XS", "S", "S/M"}
-    if top_reason == "TOO_SMALL":
-        return True
-    if anomaly_sizes:
-        anomaly_names = {s["size"] for s in anomaly_sizes}
-        return bool(anomaly_names & small_sizes)
-    return False
-
-
-def _is_large_size_issue(anomaly_sizes: List[dict], top_reason: Optional[str]) -> bool:
-    large_sizes = {"XL", "XXL", "2XL", "3XL", "4XL", "5XL"}
-    if top_reason == "TOO_LARGE":
-        return True
-    if anomaly_sizes:
-        anomaly_names = {s["size"] for s in anomaly_sizes}
-        return bool(anomaly_names & large_sizes)
-    return False
-
-
-def _reason_detail(top_reason: Optional[str], reason_pct: float) -> str:
-    if not top_reason:
+def size_action(
+    return_rate: float,
+    p75: float,
+    pct_small: float,
+    pct_large: float,
+    pct_quality: float,
+    pct_other: float,
+    is_flagged: bool,
+    stock: int = 0,
+) -> str:
+    """
+    Size-level recommendation. Two axes: sizing + quality.
+    Stock-aware: if clear pattern + high stock → relabel existing stock.
+    """
+    if not is_flagged:
         return ""
-    reason_labels = {
-        "TOO_SMALL": "Too small",
-        "TOO_LARGE": "Too large",
-        "EXPECTATION_MISMATCH": "Doesn't match expectations",
-        "DEFECTIVE_PRODUCT": "Product defective/damaged",
-        "NO_LONGER_WANTED": "No longer wanted",
-        "WRONG_PRODUCT": "Wrong product received",
-        "NOT_DELIVERED": "Not delivered",
-        "DELIVERY_ISSUE": "Delivery issue",
-        "SURPLUS_PRODUCT": "Ordered multiple sizes",
-        "OTHER": "Other",
-    }
-    label = reason_labels.get(top_reason, top_reason)
-    return f"Top return reason: \"{label}\" ({reason_pct:.0%} of returns). "
+
+    issues = []
+    sizing_total = pct_small + pct_large
+    clear_pattern = False
+
+    # --- Sizing axis ---
+    if sizing_total > 0.1:
+        if pct_small > 0 and (pct_large == 0 or pct_small / max(pct_large, 0.01) >= 3):
+            clear_pattern = True
+            if stock >= RELABEL_STOCK_THRESHOLD:
+                issues.append(f"Runs small ({pct_small:.0%}). Relabel stock ({stock} units) + size up next batch.")
+            else:
+                issues.append(f"Runs small ({pct_small:.0%}). Size up next batch.")
+        elif pct_large > 0 and (pct_small == 0 or pct_large / max(pct_small, 0.01) >= 3):
+            clear_pattern = True
+            if stock >= RELABEL_STOCK_THRESHOLD:
+                issues.append(f"Runs large ({pct_large:.0%}). Relabel stock ({stock} units) + size down next batch.")
+            else:
+                issues.append(f"Runs large ({pct_large:.0%}). Size down next batch.")
+        elif pct_small > 0 and pct_small / max(pct_large, 0.01) >= 1.5:
+            issues.append(f"Likely runs small ({pct_small:.0%} vs {pct_large:.0%} large). Check measurements.")
+        elif pct_large > 0 and pct_large / max(pct_small, 0.01) >= 1.5:
+            issues.append(f"Likely runs large ({pct_large:.0%} vs {pct_small:.0%} small). Check measurements.")
+        elif pct_small >= 0.15 and pct_large >= 0.15:
+            issues.append(f"Inconsistent sizing ({pct_small:.0%} small, {pct_large:.0%} large). Review size chart.")
+
+    # --- Quality axis ---
+    if pct_quality >= 0.40:
+        issues.append(f"Quality issue ({pct_quality:.0%}). Review photos/description + inspect stock.")
+    elif pct_quality >= 0.25:
+        issues.append(f"Quality concerns ({pct_quality:.0%}). Check listing accuracy.")
+
+    # --- Other axis ---
+    if pct_other >= 0.40 and sizing_total < 0.20:
+        issues.append(f"High other returns ({pct_other:.0%}). Check customer reviews.")
+
+    if issues:
+        return " | ".join(issues)
+    return f"Above P75 ({p75:.0%}). Investigate."
+
+
+def sku_summary(size_actions: List[dict]) -> str:
+    """
+    SKU-level summary looking at patterns across all problematic sizes.
+    Only generated when pattern is consistent across sizes.
+    """
+    flagged = [s for s in size_actions if s.get("is_flagged")]
+    if not flagged:
+        return ""
+
+    n = len(flagged)
+    avg_small = sum(s.get("pct_small", 0) for s in flagged) / n
+    avg_large = sum(s.get("pct_large", 0) for s in flagged) / n
+    avg_quality = sum(s.get("pct_quality", 0) for s in flagged) / n
+    total_stock = sum(s.get("stock", 0) for s in flagged)
+
+    parts = []
+
+    # Check if small sizes say "too large" and large sizes say "too small" (grading issue)
+    small_group = [s for s in flagged if s.get("size", "").upper() in {"XXS", "XS", "S"}]
+    large_group = [s for s in flagged if s.get("size", "").upper() in {"XL", "XXL", "2XL", "3XL"}]
+    if small_group and large_group:
+        small_says_large = sum(s.get("pct_large", 0) for s in small_group) / len(small_group)
+        large_says_small = sum(s.get("pct_small", 0) for s in large_group) / len(large_group)
+        if small_says_large > 0.25 and large_says_small > 0.25:
+            parts.append("Grading issue — size increments are off. Audit full size range with supplier.")
+            return " | ".join(parts)
+
+    # Consistent sizing direction across all sizes
+    if avg_small > 0 and (avg_large == 0 or avg_small / max(avg_large, 0.01) >= 3):
+        if total_stock >= RELABEL_STOCK_THRESHOLD:
+            parts.append(f"Runs small across all sizes. Relabel parkpalet stock ({total_stock} units) + revise measurements for next batch.")
+        else:
+            parts.append("Runs small across all sizes. Revise measurements for next batch.")
+    elif avg_large > 0 and (avg_small == 0 or avg_large / max(avg_small, 0.01) >= 3):
+        if total_stock >= RELABEL_STOCK_THRESHOLD:
+            parts.append(f"Runs large across all sizes. Relabel parkpalet stock ({total_stock} units) + revise measurements for next batch.")
+        else:
+            parts.append("Runs large across all sizes. Revise measurements for next batch.")
+
+    if avg_quality >= 0.30:
+        parts.append("Systematic quality issue. Inspect stock + escalate to supplier.")
+
+    return " | ".join(parts)

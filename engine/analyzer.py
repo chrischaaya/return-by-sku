@@ -72,6 +72,7 @@ def load_data() -> dict:
     first_orders_raw = pipelines.get_sku_first_order_dates()
     returns_recent_raw = pipelines.get_returns_last_30d_by_sku()
     returns_prev_raw = pipelines.get_returns_prev_30d_by_sku()
+    stock_raw = pipelines.get_parkpalet_stock()
 
     # --- Build DataFrames ---
     df_ret = pd.DataFrame(returns_raw) if returns_raw else pd.DataFrame(
@@ -98,6 +99,9 @@ def load_data() -> dict:
     )
     df_ret_prev = pd.DataFrame(returns_prev_raw) if returns_prev_raw else pd.DataFrame(
         columns=["sku_prefix", "returned_prev"]
+    )
+    df_stock = pd.DataFrame(stock_raw) if stock_raw else pd.DataFrame(
+        columns=["sku_prefix", "size", "parkpalet_stock"]
     )
 
     # Aggregate recent sales size-level (fast+slow channel results need merging)
@@ -128,6 +132,13 @@ def load_data() -> dict:
 
     # --- SKU × Size level (all-time) ---
     df_sku_size = _compute_sku_size(df_ret, df_ord, df_prod)
+
+    # --- Merge parkpalet stock ---
+    if not df_sku_size.empty and not df_stock.empty:
+        df_sku_size = df_sku_size.merge(df_stock, on=["sku_prefix", "size"], how="left")
+        df_sku_size["parkpalet_stock"] = df_sku_size["parkpalet_stock"].fillna(0).astype(int)
+    elif not df_sku_size.empty:
+        df_sku_size["parkpalet_stock"] = 0
 
     # --- SKU level ---
     df_sku = _compute_sku_level(df_sku_size, df_ret, df_prod, df_recent, df_first,
