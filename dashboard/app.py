@@ -286,7 +286,7 @@ else:
                             size_display["pct_other"] = size_display.apply(lambda r: f"{r['pct_other']:.0%}" if r["has_enough_reasons"] and r["pct_other"] > 0 else "—", axis=1)
                             size_display = size_display.drop(columns=["has_enough_reasons"])
                             size_display.columns = [
-                                "Size", "Sold", "Return Rate",
+                                "Size", "Eligible Sales", "Return Rate",
                                 "% Too Small", "% Too Large", "% Quality", "% Other",
                                 "Stock", "Action"
                             ]
