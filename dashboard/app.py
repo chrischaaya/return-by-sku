@@ -241,6 +241,12 @@ else:
 
                             p75_val = sku_sizes["size_p75"].iloc[0] if "size_p75" in sku_sizes.columns else 0
 
+                            # Min reasons threshold depends on view
+                            min_reasons = config.RISING_STAR_MIN_SALES_PER_SIZE if is_rising else config.MIN_RECENT_SALES_PER_SIZE
+
+                            if "reason_count" not in sku_sizes.columns:
+                                sku_sizes["reason_count"] = 0
+
                             # Generate actions
                             sku_sizes["action"] = sku_sizes.apply(
                                 lambda s: size_action(
@@ -252,9 +258,14 @@ else:
                                     s.get(problematic_col, False),
                                     s.get("parkpalet_stock", 0),
                                     s.get("sold", 0),
+                                    s.get("reason_count", 0),
+                                    min_reasons,
                                 ),
                                 axis=1,
                             )
+
+                            # Hide reason columns for sizes with insufficient reason data
+                            sku_sizes["has_enough_reasons"] = sku_sizes["reason_count"] >= min_reasons
 
                             is_problematic = sku_sizes[problematic_col].values if problematic_col in sku_sizes.columns else sku_sizes["is_problematic"].values
 
@@ -264,14 +275,16 @@ else:
                             size_display = sku_sizes[[
                                 "size", "sold", "return_rate",
                                 "pct_too_small", "pct_too_large", "pct_quality", "pct_other",
-                                "parkpalet_stock", "action"
+                                "parkpalet_stock", "action", "has_enough_reasons"
                             ]].copy()
 
                             size_display["return_rate"] = size_display["return_rate"].apply(lambda x: f"{x:.1%}")
-                            size_display["pct_too_small"] = size_display["pct_too_small"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
-                            size_display["pct_too_large"] = size_display["pct_too_large"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
-                            size_display["pct_quality"] = size_display["pct_quality"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
-                            size_display["pct_other"] = size_display["pct_other"].apply(lambda x: f"{x:.0%}" if x > 0 else "—")
+                            # Only show reason breakdown if enough data
+                            size_display["pct_too_small"] = size_display.apply(lambda r: f"{r['pct_too_small']:.0%}" if r["has_enough_reasons"] and r["pct_too_small"] > 0 else "—", axis=1)
+                            size_display["pct_too_large"] = size_display.apply(lambda r: f"{r['pct_too_large']:.0%}" if r["has_enough_reasons"] and r["pct_too_large"] > 0 else "—", axis=1)
+                            size_display["pct_quality"] = size_display.apply(lambda r: f"{r['pct_quality']:.0%}" if r["has_enough_reasons"] and r["pct_quality"] > 0 else "—", axis=1)
+                            size_display["pct_other"] = size_display.apply(lambda r: f"{r['pct_other']:.0%}" if r["has_enough_reasons"] and r["pct_other"] > 0 else "—", axis=1)
+                            size_display = size_display.drop(columns=["has_enough_reasons"])
                             size_display.columns = [
                                 "Size", "Sold", "Return Rate",
                                 "% Too Small", "% Too Large", "% Quality", "% Other",
@@ -293,9 +306,10 @@ else:
                                 lambda s: {
                                     "size": s["size"],
                                     "is_flagged": s.get(_prob_col, False),
-                                    "pct_small": s.get("pct_too_small", 0),
-                                    "pct_large": s.get("pct_too_large", 0),
-                                    "pct_quality": s.get("pct_quality", 0),
+                                    "has_enough_reasons": s.get("reason_count", 0) >= min_reasons,
+                                    "pct_small": s.get("pct_too_small", 0) if s.get("reason_count", 0) >= min_reasons else 0,
+                                    "pct_large": s.get("pct_too_large", 0) if s.get("reason_count", 0) >= min_reasons else 0,
+                                    "pct_quality": s.get("pct_quality", 0) if s.get("reason_count", 0) >= min_reasons else 0,
                                     "stock": s.get("parkpalet_stock", 0),
                                 },
                                 axis=1,

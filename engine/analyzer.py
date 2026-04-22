@@ -189,22 +189,23 @@ def _compute_sku_size(
 
     ord_agg["return_rate"] = (ord_agg["returned"] / ord_agg["sold"]).clip(upper=1.0)
 
-    # Size-level reason percentages
+    # Size-level reason percentages + count of reasons with data
     def _size_reason_pcts(reasons):
         total = len([r for r in reasons if r is not None])
         if total == 0:
-            return 0.0, 0.0, 0.0, 0.0
+            return 0.0, 0.0, 0.0, 0.0, 0
         ts = sum(1 for r in reasons if r == "TOO_SMALL")
         tl = sum(1 for r in reasons if r == "TOO_LARGE")
         qual = sum(1 for r in reasons if r in config.QUALITY_REASONS)
         ot = total - ts - tl - qual
-        return ts / total, tl / total, qual / total, max(ot / total, 0)
+        return ts / total, tl / total, qual / total, max(ot / total, 0), total
 
     pcts = ord_agg["size_reasons"].apply(_size_reason_pcts)
     ord_agg["pct_too_small"] = pcts.apply(lambda x: x[0])
     ord_agg["pct_too_large"] = pcts.apply(lambda x: x[1])
     ord_agg["pct_quality"] = pcts.apply(lambda x: x[2])
     ord_agg["pct_other"] = pcts.apply(lambda x: x[3])
+    ord_agg["reason_count"] = pcts.apply(lambda x: x[4])
 
     # Add product metadata
     prod_dedup = df_prod.drop_duplicates(subset="sku_prefix")
