@@ -89,22 +89,13 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 # --- Header ---
-h1, h2, h3, h4 = st.columns([5, 1, 1, 0.5])
+h1, h2, h3 = st.columns([5, 1, 0.5])
 with h1:
     st.title("Return Investigation Tool")
     st.caption(f"Last updated: {get_cache_age()}")
 with h2:
     should_update = st.button("Refresh Data", use_container_width=True)
 with h3:
-    if st.button("Load Test Data", use_container_width=True):
-        seed_test_scenarios()
-        st.session_state.pop("computed", None)
-        st.toast("Test scenarios loaded!")
-    if st.button("Clear Test Data", use_container_width=True):
-        clear_test_scenarios()
-        st.session_state.pop("computed", None)
-        st.toast("Test data cleared!")
-with h4:
     show_settings = st.button("⚙️", use_container_width=True)
 
 # --- Settings panel ---
