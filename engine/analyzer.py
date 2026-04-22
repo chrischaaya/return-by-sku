@@ -42,6 +42,7 @@ def load_data() -> dict:
     products_raw = pipelines.get_product_metadata()
     first_orders_raw = pipelines.get_sku_first_order_dates()
     stock_raw = pipelines.get_parkpalet_stock()
+    all_sizes_raw = pipelines.get_all_sku_sizes()
 
     # --- Build DataFrames ---
     df_ret = pd.DataFrame(returns_raw) if returns_raw else pd.DataFrame(
@@ -95,6 +96,19 @@ def load_data() -> dict:
 
     # --- SKU × Size level (all-time) ---
     df_sku_size = _compute_sku_size(df_ret, df_ord, df_prod)
+
+    # --- Merge all defined sizes (so sizes with 0 sales still appear) ---
+    df_all_sizes = pd.DataFrame(all_sizes_raw) if all_sizes_raw else pd.DataFrame(columns=["sku_prefix", "size"])
+    if not df_all_sizes.empty and not df_sku_size.empty:
+        df_sku_size = df_all_sizes.merge(df_sku_size, on=["sku_prefix", "size"], how="left")
+        df_sku_size["sold"] = df_sku_size["sold"].fillna(0).astype(int)
+        df_sku_size["returned"] = df_sku_size["returned"].fillna(0).astype(int)
+        df_sku_size["return_rate"] = (df_sku_size["returned"] / df_sku_size["sold"].replace(0, 1)).clip(upper=1.0)
+        df_sku_size.loc[df_sku_size["sold"] == 0, "return_rate"] = 0.0
+        # Fill missing metadata from existing rows of same skuPrefix
+        for col in ["product_name", "category", "category_l3", "category_l4", "supplier_name", "fit_type", "image_url"]:
+            if col in df_sku_size.columns:
+                df_sku_size[col] = df_sku_size.groupby("sku_prefix")[col].transform(lambda x: x.ffill().bfill())
 
     # --- Merge parkpalet stock ---
     if not df_sku_size.empty and not df_stock.empty:

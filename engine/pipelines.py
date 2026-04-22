@@ -373,6 +373,37 @@ def get_product_metadata() -> list:
     return list(db[config.COLL_PRODUCTS].aggregate(pipeline, allowDiskUse=True))
 
 
+def get_all_sku_sizes() -> list:
+    """
+    Get all defined sizes per skuPrefix from the Products.skus array.
+    Used to show all sizes even if they have 0 sales.
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {"$match": {"merchantKey": config.MERCHANT_KEY}},
+        {"$unwind": "$skus"},
+        {"$match": {"skus.skuPrefix": {"$in": hiccup_skus}}},
+        {
+            "$group": {
+                "_id": {"skuPrefix": "$skus.skuPrefix", "size": "$skus.size"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id.skuPrefix",
+                "size": "$_id.size",
+            }
+        },
+    ]
+
+    return list(db[config.COLL_PRODUCTS].aggregate(pipeline, allowDiskUse=True))
+
+
 def get_parkpalet_stock() -> list:
     """
     Parkpalet warehouse stock at (skuPrefix, size) level.
