@@ -288,8 +288,35 @@ def render_size_table(sku_prefix, is_rising=False):
             return ["background-color: #ffcccc"] * len(row_df)
         return [""] * len(row_df)
 
-    styled = size_display.style.apply(highlight_rows, axis=1)
-    st.dataframe(styled, use_container_width=True, hide_index=True)
+    # Build HTML table with wrapping action column
+    html = '<table style="width:100%; border-collapse:collapse; font-size:14px;">'
+    html += '<tr style="background:#f8f8f8; font-weight:bold; border-bottom:2px solid #ddd;">'
+    for col in size_display.columns:
+        html += f'<th style="padding:6px 8px; text-align:left;">{col}</th>'
+    html += '</tr>'
+
+    for i, (_, row_data) in enumerate(size_display.iterrows()):
+        is_total = i == len(size_display) - 1
+        is_problem = i < len(is_prob_extended) and is_prob_extended[i]
+
+        if is_total:
+            bg = "background:#f0f0f0; font-weight:bold;"
+        elif is_problem:
+            bg = "background:#ffcccc;"
+        else:
+            bg = ""
+
+        html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
+        for col in size_display.columns:
+            val = row_data[col]
+            style = "padding:6px 8px; vertical-align:top;"
+            if col == "Action":
+                style += " white-space:pre-wrap; min-width:200px;"
+            html += f'<td style="{style}">{val}</td>'
+        html += '</tr>'
+
+    html += '</table>'
+    st.markdown(html, unsafe_allow_html=True)
 
 
 def render_sku_list(display, is_rising=False, cta_mode="action"):
