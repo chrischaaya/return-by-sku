@@ -25,6 +25,7 @@ from engine.actions import (
     revert_waiting, get_excluded_skus, get_skus_by_status,
     check_transitions, seed_test_scenarios,
 )
+from engine.cache import save_cache, load_cache, get_cache_age
 
 # --- Size ordering ---
 SIZE_ORDER = [
@@ -46,6 +47,7 @@ def size_sort_key(size):
 h1, h2, h3 = st.columns([4, 1, 1])
 with h1:
     st.title("Return Investigation Tool")
+    st.caption(f"Data: {get_cache_age()}")
 with h2:
     should_update = st.button("Update Data", use_container_width=True)
 with h3:
@@ -55,11 +57,25 @@ with h3:
         st.toast("Test scenarios loaded!")
 
 # --- Load / refresh data ---
-if should_update or "data" not in st.session_state:
-    with st.spinner("Loading data from MongoDB..."):
+if should_update:
+    # Full refresh: recompute from source collections and save to cache
+    with st.spinner("Recomputing data from MongoDB... (this may take ~30s)"):
         st.session_state["data"] = load_data()
+        save_cache(st.session_state["data"])
         st.session_state.pop("computed", None)
-    st.toast("Data loaded!")
+    st.toast("Data updated and cached!")
+elif "data" not in st.session_state:
+    # First load: try cache first, fall back to full computation
+    cached = load_cache()
+    if cached and cached.get("updatedOn"):
+        st.session_state["data"] = cached
+        st.toast(f"Loaded from cache ({get_cache_age()})")
+    else:
+        with st.spinner("First load — computing from MongoDB... (this may take ~30s)"):
+            st.session_state["data"] = load_data()
+            save_cache(st.session_state["data"])
+            st.session_state.pop("computed", None)
+        st.toast("Data computed and cached!")
 
 data = st.session_state.get("data")
 
