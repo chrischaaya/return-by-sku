@@ -672,13 +672,29 @@ def _render_tracking_table(rows):
     """Render the tracking table as HTML."""
     html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
     html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
-    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("Return %", "center")]:
+    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("New PO Inbound", "center")]:
         html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
     html += '</tr>'
 
     for r in rows:
-        pm_str = f" · {r['pm']}" if r["pm"] else ""
-        action_text = r["action_summary"].replace('"', '&quot;')
+        is_bad = r.get("change_pp") is not None and r["change_pp"] > 0
+        bg = "background:#fef2f2;" if is_bad else ""
+
+        before = f"{r['pre_po']:.1%}" if r.get("pre_po") is not None else "—"
+        after = f"{r['last_14d']:.1%}" if r.get("last_14d") is not None else "—"
+
+        if r.get("change_pp") is not None:
+            if r["change_pp"] <= -0.5:
+                change = f'<span style="font-weight:700; color:#16a34a;">▼ {abs(r["change_pp"]):.1f}pp</span>'
+            elif r["change_pp"] >= 0.5:
+                change = f'<span style="font-weight:700; color:#dc2626;">▲ {r["change_pp"]:.1f}pp</span>'
+            else:
+                change = '<span style="color:#888;">~ no change</span>'
+        else:
+            change = '<span style="color:#aaa;">waiting for stock</span>'
+
+        pm_str = f" · {r['pm']}" if r.get("pm") else ""
+        action_text = r.get("action_summary", "").replace('"', '&quot;')
         created = r.get("created_on")
         date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
 
@@ -686,11 +702,16 @@ def _render_tracking_table(rows):
         if r.get("img_url") and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
             img_html = f'<img src="{r["img_url"]}" style="width:36px; height:45px; object-fit:cover; border-radius:4px;">'
 
-        html += f'<tr style="border-bottom:1px solid #eee;">'
+        po_info = r.get("po_info", "")
+
+        html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
         html += f'<td style="padding:8px; text-align:center; width:44px;">{img_html}</td>'
         html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; white-space:nowrap;">{date_str} <span title="{action_text}" style="cursor:help; color:#aaa;">&#9432;</span></td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{r["lifetime"]:.1%}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{before}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{after}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px;">{change}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px;">{po_info or "<span style=&quot;color:#aaa;&quot;>no PO yet</span>"}</td>'
         html += '</tr>'
 
     html += '</table>'
@@ -912,23 +933,14 @@ with tab_track:
     else:
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Build table rows from existing df_sku data — no heavy queries
-        tracking_rows = []
-        for sku_prefix, action_doc in sorted_tracking:
-            row = df_sku[df_sku["sku_prefix"] == sku_prefix]
-            name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
-            img_url = row.iloc[0].get("image_url") if not row.empty else None
-            supplier = row.iloc[0].get("supplier_name", "N/A") if not row.empty else "N/A"
-            pm = row.iloc[0].get("product_manager", "") if not row.empty else ""
-            lifetime = float(row.iloc[0]["return_rate"]) if not row.empty else 0
-            created_on = action_doc.get("createdOn")
-            days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
-            tracking_rows.append({
-                "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
-                "supplier": supplier, "pm": pm,
-                "action_summary": action_doc.get("actionSummary", "N/A"),
-                "created_on": created_on, "days_ago": days_ago, "lifetime": lifetime,
-            })
+        # Batch preload (cache key = hour + SKU list)
+        import json
+        pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
+        cache_key = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}_{','.join(sorted(s for s, _ in sorted_tracking))}"
+        preloaded = preload_tracking_batch(cache_key, json.dumps(pairs))
+
+        # Build all rows with Before/After/Change
+        tracking_rows = [_build_tracking_row(s, d, preloaded) for s, d in sorted_tracking]
 
         # ── Graph section: on-demand for one product ──
         graph_search = st.text_input("Analyze product", placeholder="Type product name or SKU to load its return rate trend...", key="track_graph_search", label_visibility="collapsed")
@@ -942,22 +954,14 @@ with tab_track:
                     break
 
         if graph_sku:
-            action_doc = tracking_data[graph_sku]
-            created_on = action_doc.get("createdOn")
-            action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-            with st.spinner("Loading trend data..."):
-                td = get_tracking_data(graph_sku, action_iso)
             graph_row = next(r for r in tracking_rows if r["sku_prefix"] == graph_sku)
-            graph_row["td"] = td
+            td = graph_row["td"]
 
-            # Metrics
-            pre_po = td["pre_po_rate"]
-            last_14d = td["last_14d_rate"]
             mc1, mc2, mc3, mc4 = st.columns(4)
             with mc1:
-                st.metric("Last 14 days", f"{last_14d:.1%}" if last_14d is not None else "—")
+                st.metric("Last 14 days", f"{td['last_14d_rate']:.1%}" if td["last_14d_rate"] is not None else "—")
             with mc2:
-                st.metric("Pre-PO (30d)", f"{pre_po:.1%}" if pre_po is not None else "—")
+                st.metric("Pre-PO (30d)", f"{td['pre_po_rate']:.1%}" if td["pre_po_rate"] is not None else "—")
             with mc3:
                 st.metric("Lifetime", f"{graph_row['lifetime']:.1%}")
             with mc4:
@@ -982,7 +986,7 @@ with tab_track:
 
         st.markdown("---")
 
-        # ── Table: lightweight, instant ──
+        # ── Table with Before/After/Change ──
         st.caption(f"{len(tracking_rows)} products being tracked")
         st.markdown(_render_tracking_table(tracking_rows), unsafe_allow_html=True)
 
