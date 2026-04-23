@@ -697,12 +697,12 @@ def _render_expanded_graph(r):
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
 
     df = rolling_df.copy()
-    if isinstance(date_range, (list, tuple)):
-        if len(date_range) == 2:
-            df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
-        elif len(date_range) == 1:
-            # Only start date selected — filter from start, wait for end date
-            df = df[df["date"].dt.date >= date_range[0]]
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
+    elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
+        # Only start date selected — waiting for end date, use default range
+        st.caption("Select end date...")
+        df = df[df["date"].dt.date >= default_start]
     if df.empty:
         st.caption("No data in selected range")
         return
