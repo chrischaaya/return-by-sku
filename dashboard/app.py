@@ -924,10 +924,11 @@ with tab_track:
     else:
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Batch preload
+        # Batch preload (cache key = hour + SKU list, so it refreshes hourly or when SKUs change)
         import json
         pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
-        preloaded = preload_tracking_batch(json.dumps(pairs))
+        cache_key = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}_{','.join(sorted(s for s, _ in sorted_tracking))}"
+        preloaded = preload_tracking_batch(cache_key, json.dumps(pairs))
 
         # Build all rows
         tracking_rows = [_build_tracking_row(s, d, preloaded) for s, d in sorted_tracking]

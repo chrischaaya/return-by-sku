@@ -13,10 +13,11 @@ import config
 from engine import pipelines
 
 
-@st.cache_data(ttl=300)
-def preload_tracking_batch(sku_action_pairs_json: str) -> dict:
+@st.cache_data(ttl=3600)
+def preload_tracking_batch(cache_key: str, sku_action_pairs_json: str) -> dict:
     """
     Batch-fetch daily orders and returns for all tracked SKUs in 2 queries.
+    cache_key: stable key (changes only when data should refresh, e.g. hourly)
     sku_action_pairs_json: JSON string of [[sku_prefix, action_date_iso], ...]
     Returns dict of sku_prefix -> {df_ord, df_ret}.
     """
