@@ -956,70 +956,41 @@ with tab_track:
             selected_item = next((i for i in tracking_items if i["sku_prefix"] == selected_sku), None)
 
             if selected_item:
-                # Header + dismiss
-                st.markdown(
-                    f'<div style="display:flex; justify-content:space-between; align-items:flex-start;">'
-                    f'<div><h3 style="margin:0;">{selected_item["name"]}</h3>'
-                    f'<div style="font-size:12px; color:#888; margin-top:2px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}'
-                    f'{" · PM: " + selected_item["pm"] if selected_item["pm"] else ""}</div></div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-                dc1, dc2 = st.columns([1, 5])
-                with dc1:
-                    if st.button("✓ Dismiss", key="dismiss_selected"):
-                        st.session_state["confirm_dismiss"] = selected_sku
-                if st.session_state.get("confirm_dismiss") == selected_sku:
-                    st.warning("Remove from tracking?")
-                    cc1, cc2, cc3 = st.columns([1, 1, 4])
-                    with cc1:
-                        if st.button("Confirm", key="confirm_yes", type="primary"):
-                            dismiss_sku(selected_sku)
-                            st.session_state.pop("track_selected", None)
-                            st.session_state.pop("confirm_dismiss", None)
-                            st.toast(f"Dismissed: {selected_item['name']}")
-                            st.rerun()
-                    with cc2:
-                        if st.button("Cancel", key="confirm_no"):
-                            st.session_state.pop("confirm_dismiss", None)
-                            st.rerun()
-
-                # Action summary
-                st.markdown(
-                    f'<div style="padding:10px 14px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:13px; margin-bottom:14px;">'
-                    f'<b>Action:</b> {selected_item["action_summary"]}'
-                    f' <span style="color:#999;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
                 # Load graph data on demand
                 action_doc = tracking_data[selected_sku]
                 created_on = action_doc.get("createdOn")
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
                 td = get_tracking_data(selected_sku, action_iso)
 
-                # Check if there's enough data for a meaningful graph
+                last_14d = td["last_14d_rate"]
+                last_14d_str = f"{last_14d:.1%}" if last_14d is not None and last_14d > 0 else ("No data" if last_14d is None or last_14d == 0 else f"{last_14d:.1%}")
+                lifetime_str = f"{selected_item['lifetime']:.1%}"
+                pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
+
+                # Header block: product info + metrics + action — all as one clean HTML block
+                st.markdown(
+                    f'<div style="margin-bottom:12px;">'
+                    # Product name + meta
+                    f'<div style="font-size:20px; font-weight:700; color:#1a1a1a; line-height:1.3;">{selected_item["name"]}</div>'
+                    f'<div style="font-size:12px; color:#888; margin-top:2px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>'
+                    # Action bar
+                    f'<div style="margin-top:10px; padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px;">'
+                    f'{selected_item["action_summary"]}'
+                    f' <span style="color:#aaa;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
+                    f'</div>'
+                    # Metrics inline
+                    f'<div style="display:flex; gap:24px; margin-top:12px; padding-bottom:12px; border-bottom:1px solid #eee;">'
+                    f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{last_14d_str}</div></div>'
+                    f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{lifetime_str}</div></div>'
+                    f'</div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Graph or monitoring message
                 rolling_df = td.get("rolling_df", pd.DataFrame())
                 has_data = not rolling_df.empty and rolling_df["overall_rate"].notna().sum() >= 7
 
-                # Metrics
-                mc1, mc2, mc3 = st.columns(3)
-                with mc1:
-                    v = td["last_14d_rate"]
-                    st.metric("Last 14 days", f"{v:.1%}" if v is not None and v > 0 else ("No data" if v is None or v == 0 else f"{v:.1%}"))
-                with mc2:
-                    st.metric("Lifetime", f"{selected_item['lifetime']:.1%}")
-                with mc3:
-                    if td["pos"]:
-                        p = td["pos"][0]
-                        u = sum(i.get("received", 0) for i in p.get("items", []))
-                        d = p["received_on"]
-                        st.metric("PO Inbound", f"{d.strftime('%d %b') if hasattr(d, 'strftime') else str(d)[:10]} ({u}u)")
-                    else:
-                        st.metric("PO Inbound", "No PO yet")
-
-                # Graph or monitoring message
                 if has_data:
                     selected_item["td"] = td
                     _render_expanded_graph(selected_item)
@@ -1033,8 +1004,26 @@ with tab_track:
                         '</div></div>',
                         unsafe_allow_html=True,
                     )
-                    if td.get("pos"):
-                        st.caption(f"Lifetime return rate: {selected_item['lifetime']:.1%}")
+
+                # Dismiss at bottom
+                st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+                dc1, dc2 = st.columns([1, 5])
+                with dc1:
+                    if st.button("✓ Dismiss", key="dismiss_selected"):
+                        st.session_state["confirm_dismiss"] = selected_sku
+                if st.session_state.get("confirm_dismiss") == selected_sku:
+                    cc1, cc2, cc3 = st.columns([1, 1, 4])
+                    with cc1:
+                        if st.button("Confirm", key="confirm_yes", type="primary"):
+                            dismiss_sku(selected_sku)
+                            st.session_state.pop("track_selected", None)
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.toast(f"Dismissed: {selected_item['name']}")
+                            st.rerun()
+                    with cc2:
+                        if st.button("Cancel", key="confirm_no"):
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.rerun()
             else:
                 st.markdown(
                     '<div style="padding:60px 20px; text-align:center; color:#aaa;">'
