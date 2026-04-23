@@ -150,12 +150,16 @@ def get_all_orders_by_sku() -> list:
 
     results = []
 
-    # Fast channels (7 day lag)
-    fast_pipeline = [
+    # Fast channels (7 day lag) — only if not excluded
+    active_fast = [ch for ch in config.FAST_DELIVERY_CHANNELS if ch not in config.EXCLUDED_CHANNELS]
+    if not active_fast:
+        fast_pipeline = None
+    else:
+        fast_pipeline = [
         {
             "$match": {
                 "createdOn": {"$lte": _cutoff_fast()},
-                "salesChannel": {"$in": config.FAST_DELIVERY_CHANNELS},
+                "salesChannel": {"$in": active_fast},
                 "status": {"$in": config.VALID_ORDER_STATUSES},
             }
         },
@@ -183,7 +187,8 @@ def get_all_orders_by_sku() -> list:
             }
         },
     ]
-    results.extend(db[config.COLL_ORDERS].aggregate(fast_pipeline, allowDiskUse=True))
+    if fast_pipeline:
+        results.extend(db[config.COLL_ORDERS].aggregate(fast_pipeline, allowDiskUse=True))
 
     # Slow channels (14 day lag)
     all_excluded = config.EXCLUDED_CHANNELS + config.FAST_DELIVERY_CHANNELS
