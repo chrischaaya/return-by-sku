@@ -686,15 +686,15 @@ def _render_expanded_graph(r):
     sku = r["sku_prefix"]
     from datetime import date as date_type, timedelta as td_delta
 
-    # Time range filter + per-size toggle
-    tfc = st.columns([2, 2, 2])
+    # Time range + per-size toggle on same row
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
     default_start = max(min_date, date_type.today() - td_delta(days=60))
+    tfc = st.columns([3, 1.5, 4])
     with tfc[0]:
         date_range = st.date_input("Time range", value=(default_start, max_date), min_value=min_date, max_value=max_date, key=f"tr_{sku}", label_visibility="collapsed")
-    with tfc[2]:
-        show_sizes = st.checkbox("Per-size lines", key=f"sizes_{sku}", value=False)
+    with tfc[1]:
+        show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
 
     df = rolling_df.copy()
     if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
@@ -727,14 +727,16 @@ def _render_expanded_graph(r):
         fig.add_shape(type="line", x0=ad_str, x1=ad_str, y0=0, y1=1, yref="paper", line=dict(color="#f59e0b", width=2, dash="dash"))
         fig.add_annotation(x=ad_str, y=1, yref="paper", text=f"ACTION ({ad_label})", showarrow=False, font=dict(color="#f59e0b", size=10), yshift=10)
 
-    for po in td["pos"]:
+    # Show ALL POs within the visible date range (including older ones)
+    all_sku_pos = pipelines.get_sku_pos(sku, df["date"].min().to_pydatetime().replace(tzinfo=timezone.utc) - td_delta(days=30))
+    for po in (all_sku_pos or []):
         received = po.get("received_on")
         if received:
             rs = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
             rs_label = received.strftime("%d %b") if hasattr(received, "strftime") else rs
             units = sum(it.get("received", 0) for it in po.get("items", []))
             fig.add_shape(type="line", x0=rs, x1=rs, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
-            fig.add_annotation(x=rs, y=1, yref="paper", text=f"PO INBOUND {rs_label} ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
+            fig.add_annotation(x=rs, y=1, yref="paper", text=f"PO {rs_label} ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
 
     all_vals = df["overall_rate"].dropna().tolist()
     if show_sizes:
@@ -984,21 +986,21 @@ with tab_track:
                     f'</div>',
                     unsafe_allow_html=True,
                 )
-                dc1, dc2, dc3 = st.columns([6, 1, 1])
-                with dc2:
-                    if st.button("Dismiss", key="dismiss_selected"):
+                dc1, dc2 = st.columns([1, 5])
+                with dc1:
+                    if st.button("✓ Dismiss", key="dismiss_selected"):
                         st.session_state["confirm_dismiss"] = selected_sku
                 if st.session_state.get("confirm_dismiss") == selected_sku:
                     st.warning("Remove from tracking?")
-                    cc1, cc2, cc3 = st.columns([4, 1, 1])
-                    with cc2:
+                    cc1, cc2, cc3 = st.columns([1, 1, 4])
+                    with cc1:
                         if st.button("Confirm", key="confirm_yes", type="primary"):
                             dismiss_sku(selected_sku)
                             st.session_state.pop("track_selected", None)
                             st.session_state.pop("confirm_dismiss", None)
                             st.toast(f"Dismissed: {selected_item['name']}")
                             st.rerun()
-                    with cc3:
+                    with cc2:
                         if st.button("Cancel", key="confirm_no"):
                             st.session_state.pop("confirm_dismiss", None)
                             st.rerun()
@@ -1022,17 +1024,14 @@ with tab_track:
                 rolling_df = td.get("rolling_df", pd.DataFrame())
                 has_data = not rolling_df.empty and rolling_df["overall_rate"].notna().sum() >= 7
 
-                # Metrics — show "No data" instead of misleading "0.0%"
-                mc1, mc2, mc3, mc4 = st.columns(4)
+                # Metrics
+                mc1, mc2, mc3 = st.columns(3)
                 with mc1:
                     v = td["last_14d_rate"]
                     st.metric("Last 14 days", f"{v:.1%}" if v is not None and v > 0 else ("No data" if v is None or v == 0 else f"{v:.1%}"))
                 with mc2:
-                    v = td["pre_po_rate"]
-                    st.metric("Pre-PO (30d)", f"{v:.1%}" if v is not None else "Waiting for PO")
-                with mc3:
                     st.metric("Lifetime", f"{selected_item['lifetime']:.1%}")
-                with mc4:
+                with mc3:
                     if td["pos"]:
                         p = td["pos"][0]
                         u = sum(i.get("received", 0) for i in p.get("items", []))
