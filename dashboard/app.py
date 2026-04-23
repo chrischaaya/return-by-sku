@@ -24,8 +24,8 @@ import config
 from engine.analyzer import load_data
 from engine.recommender import size_action, sku_summary
 from engine.actions import (
-    save_action, save_no_action, dismiss_sku, revert_no_action,
-    revert_waiting, get_excluded_skus, get_skus_by_status, get_action,
+    save_action, save_no_action, dismiss_sku, resolve_sku, add_new_action,
+    revert_no_action, revert_waiting, get_excluded_skus, get_skus_by_status, get_action,
 )
 from engine.cache import save_cache, load_cache, get_cache_age
 from engine.settings import load_settings, save_settings, DEFAULTS
@@ -977,39 +977,58 @@ with tab_track:
                 lifetime_str = f"{selected_item['lifetime']:.1%}"
                 pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
 
-                # Header: name + dismiss on same line
-                hc1, hc2 = st.columns([5, 1])
-                with hc1:
-                    st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
-                with hc2:
-                    if st.button("✓ Dismiss", key="dismiss_selected"):
-                        st.session_state["confirm_dismiss"] = selected_sku
-                if st.session_state.get("confirm_dismiss") == selected_sku:
-                    cc1, cc2, cc3 = st.columns([1, 1, 4])
-                    with cc1:
-                        if st.button("Confirm", key="confirm_yes", type="primary"):
-                            dismiss_sku(selected_sku)
-                            st.session_state.pop("track_selected", None)
-                            st.session_state.pop("confirm_dismiss", None)
-                            st.toast(f"Dismissed: {selected_item['name']}")
-                            st.rerun()
-                    with cc2:
-                        if st.button("Cancel", key="confirm_no"):
-                            st.session_state.pop("confirm_dismiss", None)
+                # Header
+                st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
+
+                # Action timeline
+                actions_list = action_doc.get("actions", [])
+                if not actions_list:
+                    # Legacy: single action, no history array
+                    actions_list = [{"summary": selected_item["action_summary"], "date": created_on}]
+
+                timeline_html = '<div style="margin:10px 0 12px; border-left:2px solid #f59e0b; padding-left:12px;">'
+                for i, act in enumerate(reversed(actions_list)):
+                    a_date = act.get("date")
+                    a_str = a_date.strftime("%d %b %Y") if a_date and hasattr(a_date, "strftime") else "—"
+                    a_days = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(a_date, tz="UTC")).days if a_date else 0
+                    dot_color = "#f59e0b" if i == 0 else "#ddd"
+                    timeline_html += (
+                        f'<div style="position:relative; padding:4px 0 8px; font-size:12px;">'
+                        f'<div style="position:absolute; left:-18px; top:6px; width:10px; height:10px; border-radius:50%; background:{dot_color}; border:2px solid white;"></div>'
+                        f'<div style="font-weight:600; color:#333;">{act.get("summary", "")}</div>'
+                        f'<div style="color:#999; font-size:11px;">{a_str} ({a_days}d ago)</div>'
+                        f'</div>'
+                    )
+                timeline_html += '</div>'
+                st.markdown(timeline_html, unsafe_allow_html=True)
+
+                # CTAs: Resolved + New Action
+                cta1, cta2, cta3 = st.columns([1, 1, 3])
+                with cta1:
+                    if st.button("✓ Resolved", key="resolve_selected"):
+                        resolve_sku(selected_sku)
+                        st.session_state.pop("track_selected", None)
+                        st.toast(f"Resolved: {selected_item['name']}")
+                        st.rerun()
+                with cta2:
+                    if st.button("+ New Action", key="new_action_btn"):
+                        st.session_state["new_action_modal"] = selected_sku
+
+                if st.session_state.get("new_action_modal") == selected_sku:
+                    new_txt = st.text_area("What action was taken?", key=f"new_act_txt_{selected_sku}", placeholder="e.g. Sent revised measurements to supplier")
+                    if st.button("Submit", key="new_act_submit"):
+                        if new_txt and new_txt.strip():
+                            add_new_action(selected_sku, new_txt.strip(), selected_item["lifetime"])
+                            st.session_state.pop("new_action_modal", None)
+                            st.toast("Action added!")
                             st.rerun()
 
-                # Action + metrics block
+                # Metrics
                 st.markdown(
-                    f'<div style="margin-bottom:12px;">'
-                    f'<div style="padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px;">'
-                    f'{selected_item["action_summary"]}'
-                    f' <span style="color:#aaa;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
-                    f'</div>'
-                    f'<div style="display:flex; gap:24px; margin-top:12px; padding-bottom:12px; border-bottom:1px solid #eee;">'
+                    f'<div style="display:flex; gap:24px; margin-top:8px; padding-bottom:12px; border-bottom:1px solid #eee;">'
                     f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{last_14d_str}</div></div>'
                     f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{lifetime_str}</div></div>'
-                    f'</div>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )

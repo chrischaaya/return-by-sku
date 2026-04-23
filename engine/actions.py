@@ -34,21 +34,54 @@ def _coll():
 # --- Write operations ---
 
 def save_action(sku_prefix: str, action_summary: str, overall_rate: float):
+    """Save a new action. Pushes to actions array (keeps full history)."""
+    now = datetime.now(timezone.utc)
+    action_entry = {
+        "summary": action_summary,
+        "date": now,
+        "overallRate": overall_rate,
+    }
     try:
         _coll().update_one(
             {"skuPrefix": sku_prefix},
-            {"$set": {
-                "status": "tracking",
-                "actionSummary": action_summary,
-                "updatedOn": datetime.now(timezone.utc),
-                "overallRateAtAction": overall_rate,
-            }, "$setOnInsert": {
-                "createdOn": datetime.now(timezone.utc),
-            }},
+            {
+                "$set": {
+                    "status": "tracking",
+                    "actionSummary": action_summary,
+                    "updatedOn": now,
+                    "overallRateAtAction": overall_rate,
+                },
+                "$push": {"actions": action_entry},
+                "$setOnInsert": {"createdOn": now},
+            },
             upsert=True,
         )
     except Exception as e:
         st.error(f"Failed to save action for {sku_prefix}: {e}")
+
+
+def add_new_action(sku_prefix: str, action_summary: str, overall_rate: float):
+    """Add a follow-up action to an existing tracked SKU."""
+    now = datetime.now(timezone.utc)
+    action_entry = {
+        "summary": action_summary,
+        "date": now,
+        "overallRate": overall_rate,
+    }
+    try:
+        _coll().update_one(
+            {"skuPrefix": sku_prefix},
+            {
+                "$set": {
+                    "actionSummary": action_summary,
+                    "updatedOn": now,
+                    "overallRateAtAction": overall_rate,
+                },
+                "$push": {"actions": action_entry},
+            },
+        )
+    except Exception as e:
+        st.error(f"Failed to add action for {sku_prefix}: {e}")
 
 
 def save_no_action(sku_prefix: str):
@@ -67,14 +100,20 @@ def save_no_action(sku_prefix: str):
         st.error(f"Failed to save no-action for {sku_prefix}: {e}")
 
 
-def dismiss_sku(sku_prefix: str):
+def resolve_sku(sku_prefix: str):
+    """Mark as resolved — removes from Action Tracking."""
     try:
         _coll().update_one(
             {"skuPrefix": sku_prefix},
-            {"$set": {"status": "dismissed", "updatedOn": datetime.now(timezone.utc)}},
+            {"$set": {"status": "resolved", "updatedOn": datetime.now(timezone.utc)}},
         )
     except Exception as e:
-        st.error(f"Failed to dismiss {sku_prefix}: {e}")
+        st.error(f"Failed to resolve {sku_prefix}: {e}")
+
+
+def dismiss_sku(sku_prefix: str):
+    """Alias for resolve_sku (backward compat)."""
+    resolve_sku(sku_prefix)
 
 
 def revert_waiting(sku_prefix: str):
@@ -107,7 +146,7 @@ def get_all_actions() -> dict:
 def get_excluded_skus() -> set:
     return {
         doc["skuPrefix"] for doc in _coll().find(
-            {"status": {"$in": ["tracking", "no_action", "dismissed"]}},
+            {"status": {"$in": ["tracking", "no_action", "dismissed", "resolved"]}},
             {"skuPrefix": 1},
         )
     }
