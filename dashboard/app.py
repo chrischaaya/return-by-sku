@@ -90,6 +90,8 @@ st.markdown("""<style>
 .progress-card { padding: 12px 14px; border-radius: 6px; background: #fffbeb; border-left: 4px solid #f59e0b; margin-bottom: 6px; font-size: 14px; }
 .new-badge { display: inline-block; background: #22c55e; color: white; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
 .sizes-affected { font-size: 13px; color: #666; }
+/* Action tracking: style selectbox to look like a search/selector */
+div[data-testid="stSelectbox"] > div { font-size: 13px; }
 </style>""", unsafe_allow_html=True)
 
 # --- Header ---
@@ -683,13 +685,15 @@ def _render_expanded_graph(r):
 
     sku = r["sku_prefix"]
     tf_key = f"tf_{sku}"
-    tfc = st.columns([1, 1, 1, 8])
+    tfc = st.columns([1, 1, 1, 3, 3])
     with tfc[0]:
         if st.button("30d", key=f"{tf_key}_30"): st.session_state[tf_key] = 30
     with tfc[1]:
         if st.button("90d", key=f"{tf_key}_90"): st.session_state[tf_key] = 90
     with tfc[2]:
         if st.button("All", key=f"{tf_key}_all"): st.session_state[tf_key] = 0
+    with tfc[4]:
+        show_sizes = st.checkbox("Per-size lines", key=f"sizes_{sku}", value=False)
 
     days_filter = st.session_state.get(tf_key, 30)
     df = rolling_df.copy()
@@ -699,8 +703,6 @@ def _render_expanded_graph(r):
     if df.empty:
         st.caption("No data in selected range")
         return
-
-    show_sizes = st.checkbox("Show per-size lines", key=f"sizes_{sku}", value=False)
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -897,23 +899,23 @@ with tab_track:
         tracking_items = []
         for sku_prefix, action_doc in sorted_tracking:
             row = df_sku[df_sku["sku_prefix"] == sku_prefix]
-            name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
-            img_url = row.iloc[0].get("image_url") if not row.empty else None
-            supplier = row.iloc[0].get("supplier_name", "N/A") if not row.empty else "N/A"
-            pm = row.iloc[0].get("product_manager", "") if not row.empty else ""
-            lifetime = float(row.iloc[0]["return_rate"]) if not row.empty else 0
+            in_data = not row.empty
+            name = row.iloc[0]["product_name"] if in_data else action_doc.get("actionSummary", sku_prefix)[:40]
+            img_url = row.iloc[0].get("image_url") if in_data else None
+            supplier = row.iloc[0].get("supplier_name", "—") if in_data else "—"
+            pm = row.iloc[0].get("product_manager", "") if in_data else ""
+            lifetime = float(row.iloc[0]["return_rate"]) if in_data else 0
             created_on = action_doc.get("createdOn")
             days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
             date_str = created_on.strftime("%d %b") if created_on and hasattr(created_on, "strftime") else "—"
             pos = all_pos.get(sku_prefix, [])
+            po_str = ""
             if pos:
                 po_d = pos[0]["received_on"]
                 po_str = po_d.strftime("%d %b") if hasattr(po_d, "strftime") else str(po_d)[:10]
-            else:
-                po_str = ""
             tracking_items.append({
                 "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
-                "supplier": supplier, "pm": pm, "lifetime": lifetime,
+                "supplier": supplier, "pm": pm, "lifetime": lifetime, "in_data": in_data,
                 "action_summary": action_doc.get("actionSummary", "N/A"),
                 "created_on": created_on, "days_ago": days_ago, "date_str": date_str,
                 "po_str": po_str,
@@ -923,40 +925,52 @@ with tab_track:
         left_col, right_col = st.columns([1, 2])
 
         with left_col:
-            # Selectbox for interaction + search
-            display_items = tracking_items
-            options = [i["sku_prefix"] for i in display_items]
-            name_map = {i["sku_prefix"]: i["name"] for i in display_items}
+            options = [i["sku_prefix"] for i in tracking_items]
+            name_map = {i["sku_prefix"]: i["name"] for i in tracking_items}
 
             if options:
+                # Selectbox = the interaction mechanism (searchable dropdown)
                 st.selectbox(
-                    "Product",
+                    "Select product",
                     options=options,
-                    format_func=lambda s: f"{name_map.get(s, s)}",
+                    format_func=lambda s: f"{name_map.get(s, s)} — {s}",
                     key="track_selected",
                     label_visibility="collapsed",
                 )
 
-                st.caption(f"{len(display_items)} tracked")
+                st.caption(f"{len(tracking_items)} tracked")
 
-                # Visual list — pure HTML matching the mockup
+                # Visual list — HTML cards matching mockup
                 selected_sku_val = st.session_state.get("track_selected", options[0])
-                list_html = '<div style="max-height:480px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">'
-                for item in display_items:
+                list_html = '<div style="max-height:500px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px;">'
+                for item in tracking_items:
                     is_sel = item["sku_prefix"] == selected_sku_val
-                    border = "border-left:3px solid #1a73e8; background:#f0f6ff;" if is_sel else "border-left:3px solid transparent;"
+                    if is_sel:
+                        card_style = "border-left:3px solid #1a73e8; background:#eff6ff;"
+                    else:
+                        card_style = "border-left:3px solid transparent;"
+
                     img_html = ""
                     if item.get("img_url") and isinstance(item["img_url"], str) and item["img_url"].startswith("http"):
-                        img_html = f'<div style="flex-shrink:0;"><img src="{item["img_url"]}" style="width:32px; height:40px; object-fit:cover; border-radius:3px;"></div>'
-                    po_line = f'PO: <b>{item["po_str"]}</b>' if item["po_str"] else 'PO: <span style="color:#aaa;">no PO yet</span>'
+                        img_html = f'<div style="flex-shrink:0;"><img src="{item["img_url"]}" style="width:36px; height:46px; object-fit:cover; border-radius:4px;"></div>'
+                    else:
+                        img_html = '<div style="flex-shrink:0; width:36px; height:46px; background:#f3f4f6; border-radius:4px;"></div>'
+
+                    po_line = f'PO: <b>{item["po_str"]}</b>' if item["po_str"] else '<span style="color:#bbb;">PO: no PO yet</span>'
+
+                    if not item["in_data"]:
+                        name_style = "color:#999;"
+                    else:
+                        name_style = ""
+
                     list_html += (
-                        f'<div style="padding:10px 12px; {border} border-bottom:1px solid #eee;">'
-                        f'<div style="display:flex; gap:8px;">'
+                        f'<div style="padding:10px 12px; {card_style} border-bottom:1px solid #f0f0f0;">'
+                        f'<div style="display:flex; gap:10px; align-items:center;">'
                         f'{img_html}'
                         f'<div style="flex:1; min-width:0;">'
-                        f'<div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{item["name"]}</div>'
-                        f'<div style="font-size:11px; color:#888;">{item["sku_prefix"]} · {item["supplier"]}</div>'
-                        f'<div style="font-size:11px; color:#555; margin-top:4px;">Action: <b>{item["date_str"]}</b> · {po_line}</div>'
+                        f'<div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; {name_style}">{item["name"]}</div>'
+                        f'<div style="font-size:11px; color:#888; margin-top:1px;">{item["sku_prefix"]} · {item["supplier"]}</div>'
+                        f'<div style="font-size:11px; color:#666; margin-top:4px;">Action: <b>{item["date_str"]}</b> · {po_line}</div>'
                         f'</div></div></div>'
                     )
                 list_html += '</div>'
@@ -967,24 +981,35 @@ with tab_track:
             selected_item = next((i for i in tracking_items if i["sku_prefix"] == selected_sku), None)
 
             if selected_item:
-                # Header + dismiss
+                # Header + dismiss with confirmation
                 hc1, hc2 = st.columns([5, 1])
                 with hc1:
-                    st.markdown(f"**{selected_item['name']}**")
+                    st.markdown(f"### {selected_item['name']}")
                     pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
                     st.caption(f"{selected_item['sku_prefix']} · {selected_item['supplier']}{pm_str}")
                 with hc2:
                     if st.button("Dismiss", key="dismiss_selected"):
-                        dismiss_sku(selected_sku)
-                        st.session_state.pop("track_selected", None)
-                        st.toast(f"Dismissed: {selected_item['name']}")
-                        st.rerun()
+                        st.session_state["confirm_dismiss"] = selected_sku
+                    if st.session_state.get("confirm_dismiss") == selected_sku:
+                        st.warning("Remove from tracking?")
+                        dc1, dc2 = st.columns(2)
+                        with dc1:
+                            if st.button("Confirm", key="confirm_yes", type="primary"):
+                                dismiss_sku(selected_sku)
+                                st.session_state.pop("track_selected", None)
+                                st.session_state.pop("confirm_dismiss", None)
+                                st.toast(f"Dismissed: {selected_item['name']}")
+                                st.rerun()
+                        with dc2:
+                            if st.button("Cancel", key="confirm_no"):
+                                st.session_state.pop("confirm_dismiss", None)
+                                st.rerun()
 
                 # Action summary
                 st.markdown(
-                    f'<div style="padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px; margin-bottom:12px;">'
+                    f'<div style="padding:10px 14px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:13px; margin-bottom:14px;">'
                     f'<b>Action:</b> {selected_item["action_summary"]}'
-                    f' <span style="color:#888;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
+                    f' <span style="color:#999;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
                     f'</div>',
                     unsafe_allow_html=True,
                 )
@@ -995,12 +1020,18 @@ with tab_track:
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
                 td = get_tracking_data(selected_sku, action_iso)
 
-                # Metrics
+                # Check if there's enough data for a meaningful graph
+                rolling_df = td.get("rolling_df", pd.DataFrame())
+                has_data = not rolling_df.empty and rolling_df["overall_rate"].notna().sum() >= 7
+
+                # Metrics — show "No data" instead of misleading "0.0%"
                 mc1, mc2, mc3, mc4 = st.columns(4)
                 with mc1:
-                    st.metric("Last 14 days", f"{td['last_14d_rate']:.1%}" if td["last_14d_rate"] is not None else "—")
+                    v = td["last_14d_rate"]
+                    st.metric("Last 14 days", f"{v:.1%}" if v is not None and v > 0 else ("No data" if v is None or v == 0 else f"{v:.1%}"))
                 with mc2:
-                    st.metric("Pre-PO (30d)", f"{td['pre_po_rate']:.1%}" if td["pre_po_rate"] is not None else "—")
+                    v = td["pre_po_rate"]
+                    st.metric("Pre-PO (30d)", f"{v:.1%}" if v is not None else "Waiting for PO")
                 with mc3:
                     st.metric("Lifetime", f"{selected_item['lifetime']:.1%}")
                 with mc4:
@@ -1012,13 +1043,26 @@ with tab_track:
                     else:
                         st.metric("PO Inbound", "No PO yet")
 
-                # Graph
-                selected_item["td"] = td
-                _render_expanded_graph(selected_item)
+                # Graph or monitoring message
+                if has_data:
+                    selected_item["td"] = td
+                    _render_expanded_graph(selected_item)
+                else:
+                    st.markdown(
+                        '<div style="padding:30px 20px; text-align:center; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; margin-top:8px;">'
+                        '<div style="font-size:24px; margin-bottom:8px;">&#9203;</div>'
+                        '<div style="font-size:14px; font-weight:600; color:#475569;">Monitoring</div>'
+                        '<div style="font-size:13px; color:#888; margin-top:6px; line-height:1.6;">'
+                        'Return rate trend will appear here once enough orders<br>have been processed. Typically 2-3 weeks after new stock arrives.'
+                        '</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                    if td.get("pos"):
+                        st.caption(f"Lifetime return rate: {selected_item['lifetime']:.1%}")
             else:
                 st.markdown(
-                    '<div style="padding:40px; text-align:center; color:#aaa;">'
-                    'Select a product from the list to see its return rate trend'
+                    '<div style="padding:60px 20px; text-align:center; color:#aaa;">'
+                    'Select a product from the list'
                     '</div>',
                     unsafe_allow_html=True,
                 )
