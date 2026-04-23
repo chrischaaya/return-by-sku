@@ -697,7 +697,7 @@ def _render_expanded_graph(r):
     # Time range + per-size toggle
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
-    default_start = max(min_date, date_type.today() - td_delta(days=60))
+    default_start = max(min_date, date_type.today() - td_delta(days=45))
     # Get metrics from the caller (passed via r dict)
     _last14 = r.get("_last14_str", "—")
     _lifetime = r.get("_lifetime_str", "—")
@@ -709,7 +709,7 @@ def _render_expanded_graph(r):
         end_d = st.date_input("To", value=max_date, min_value=min_date, max_value=max_date, key=f"tr_e_{sku}")
     with tfc[2]:
         st.markdown('<div style="height:29px;"></div>', unsafe_allow_html=True)
-        show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=True)
+        show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
     with tfc[4]:
         st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14d</div><div style="font-size:20px; font-weight:700;">{_last14}</div></div>', unsafe_allow_html=True)
     with tfc[5]:
@@ -984,7 +984,10 @@ with tab_track:
                 action_doc = tracking_data[selected_sku]
                 created_on = action_doc.get("createdOn")
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-                td = get_tracking_data(selected_sku, action_iso, days_back=375, _excluded_channels=",".join(sorted(config.EXCLUDED_CHANNELS)))
+                # Fetch from Jan 1 of current year
+                from datetime import date as _dt
+                _days = (_dt.today() - _dt(_dt.today().year, 1, 1)).days + 14
+                td = get_tracking_data(selected_sku, action_iso, days_back=_days, _excluded_channels=",".join(sorted(config.EXCLUDED_CHANNELS)))
 
                 last_14d = td["last_14d_rate"]
                 last_14d_str = f"{last_14d:.1%}" if last_14d is not None and last_14d > 0 else ("No data" if last_14d is None or last_14d == 0 else f"{last_14d:.1%}")
