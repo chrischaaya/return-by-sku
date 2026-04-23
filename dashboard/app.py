@@ -136,14 +136,21 @@ if st.session_state.get("show_settings"):
             s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
         with c6:
             s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
-        with c7:
-            all_channels = [
-                "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
-                "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
-                "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
-                "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
-            ]
-            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=s["excluded_channels"], help="Completely excluded from all calculations.")
+        all_channels = [
+            "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
+            "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
+            "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
+            "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
+        ]
+        st.caption("Excluded channels")
+        exc_c1, exc_c2 = st.columns([4, 1])
+        with exc_c1:
+            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=s["excluded_channels"], label_visibility="collapsed", help="Completely excluded from all calculations.")
+        with exc_c2:
+            if st.button("Select all", use_container_width=True):
+                s["excluded_channels"] = all_channels
+                st.session_state["excluded_channels"] = all_channels
+                st.rerun()
 
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
