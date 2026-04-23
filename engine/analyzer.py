@@ -38,7 +38,6 @@ def load_data() -> dict:
     # --- Fetch raw data ---
     returns_raw = pipelines.get_all_returns_by_sku()
     orders_raw = pipelines.get_all_orders_by_sku()
-    recent_sales_raw = pipelines.get_recent_sales_by_sku_size()
     products_raw = pipelines.get_product_metadata()
     first_orders_raw = pipelines.get_sku_first_order_dates()
     stock_raw = pipelines.get_parkpalet_stock()
@@ -50,9 +49,6 @@ def load_data() -> dict:
     )
     df_ord = pd.DataFrame(orders_raw) if orders_raw else pd.DataFrame(
         columns=["sku_prefix", "size", "sold", "product_name", "category"]
-    )
-    df_recent_size = pd.DataFrame(recent_sales_raw) if recent_sales_raw else pd.DataFrame(
-        columns=["sku_prefix", "size", "recent_sold"]
     )
     df_prod = pd.DataFrame(products_raw) if products_raw else pd.DataFrame(
         columns=[
@@ -68,25 +64,7 @@ def load_data() -> dict:
         columns=["sku_prefix", "size", "parkpalet_stock"]
     )
 
-    # Aggregate recent sales size-level (fast+slow channel results need merging)
-    if not df_recent_size.empty:
-        df_recent_size = (
-            df_recent_size.groupby(["sku_prefix", "size"], as_index=False)["recent_sold"].sum()
-        )
-
-    # Determine qualifying SKUs: at least one size with >= MIN_RECENT_SALES_PER_SIZE
-    if not df_recent_size.empty:
-        qualifying_sizes = df_recent_size[
-            df_recent_size["recent_sold"] >= config.MIN_RECENT_SALES_PER_SIZE
-        ]
-        qualifying_skus = set(qualifying_sizes["sku_prefix"].unique())
-        # Also build SKU-level recent_sold totals
-        df_recent = df_recent_size.groupby("sku_prefix", as_index=False)["recent_sold"].sum()
-    else:
-        qualifying_skus = set()
-        df_recent = pd.DataFrame(columns=["sku_prefix", "recent_sold"])
-
-    # Same for orders (fast+slow channel results need merging)
+    # Merge orders (fast+slow channel results need merging)
     if not df_ord.empty:
         df_ord = (
             df_ord.groupby(["sku_prefix", "size"])
@@ -106,7 +84,7 @@ def load_data() -> dict:
         df_sku_size["return_rate"] = (df_sku_size["returned"] / df_sku_size["sold"].replace(0, 1)).clip(upper=1.0)
         df_sku_size.loc[df_sku_size["sold"] == 0, "return_rate"] = 0.0
         # Fill missing metadata from existing rows of same skuPrefix
-        for col in ["product_name", "category", "category_l3", "category_l4", "supplier_name", "fit_type", "image_url"]:
+        for col in ["product_name", "category", "category_l3", "category_l4", "supplier_name", "fit_type", "image_url", "product_manager"]:
             if col in df_sku_size.columns:
                 df_sku_size[col] = df_sku_size.groupby("sku_prefix")[col].transform(lambda x: x.ffill().bfill())
 
@@ -117,9 +95,39 @@ def load_data() -> dict:
     elif not df_sku_size.empty:
         df_sku_size["parkpalet_stock"] = 0
 
+    # --- Merge product reviews ---
+    reviews_raw = pipelines.get_product_reviews()
+    df_reviews = pd.DataFrame(reviews_raw) if reviews_raw else pd.DataFrame(
+        columns=["sku_prefix", "size", "avg_rating", "review_count"]
+    )
+    if not df_sku_size.empty and not df_reviews.empty:
+        df_sku_size = df_sku_size.merge(df_reviews, on=["sku_prefix", "size"], how="left")
+        for col in ["avg_rating", "fit_true", "fit_small", "fit_large"]:
+            df_sku_size[col] = df_sku_size[col].fillna(0.0)
+        df_sku_size["review_count"] = df_sku_size["review_count"].fillna(0).astype(int)
+    elif not df_sku_size.empty:
+        df_sku_size["avg_rating"] = 0.0
+        df_sku_size["review_count"] = 0
+        df_sku_size["fit_true"] = 0.0
+        df_sku_size["fit_small"] = 0.0
+        df_sku_size["fit_large"] = 0.0
+
     # --- SKU level ---
-    df_sku = _compute_sku_level(df_sku_size, df_ret, df_prod, df_recent, df_first,
-                                 qualifying_skus)
+    df_sku = _compute_sku_level(df_sku_size, df_ret, df_prod, df_first)
+
+    # --- Trendyol review stats (overrides ProductReviews for summary view) ---
+    trendyol_stats = pipelines.get_trendyol_review_stats()
+    if trendyol_stats:
+        df_ty = pd.DataFrame(trendyol_stats)
+        # Override product-level rating/count where Trendyol data exists
+        df_sku = df_sku.merge(
+            df_ty.rename(columns={"review_count": "ty_review_count", "avg_rating": "ty_avg_rating"}),
+            on="sku_prefix", how="left",
+        )
+        has_ty = df_sku["ty_review_count"].notna() & (df_sku["ty_review_count"] > 0)
+        df_sku.loc[has_ty, "product_review_count"] = df_sku.loc[has_ty, "ty_review_count"].astype(int)
+        df_sku.loc[has_ty, "product_avg_rating"] = df_sku.loc[has_ty, "ty_avg_rating"]
+        df_sku.drop(columns=["ty_review_count", "ty_avg_rating"], inplace=True, errors="ignore")
 
     # --- Supplier level ---
     df_supplier = _compute_supplier_level(df_sku)
@@ -132,9 +140,6 @@ def load_data() -> dict:
         "df_sku_size": df_sku_size,
         "df_supplier": df_supplier,
         "df_category": df_category,
-        "df_recent_size": df_recent_size if not df_recent_size.empty else pd.DataFrame(
-            columns=["sku_prefix", "size", "recent_sold"]
-        ),
     }
 
 
@@ -187,7 +192,7 @@ def _compute_sku_size(
     # Add product metadata
     prod_dedup = df_prod.drop_duplicates(subset="sku_prefix")
     ord_agg = ord_agg.merge(
-        prod_dedup[["sku_prefix", "category_l3", "category_l4", "supplier_name", "fit_type", "image_url"]],
+        prod_dedup[["sku_prefix", "category_l3", "category_l4", "supplier_name", "fit_type", "image_url", "product_manager"]],
         on="sku_prefix",
         how="left",
     )
@@ -205,9 +210,7 @@ def _compute_sku_level(
     df_sku_size: pd.DataFrame,
     df_ret: pd.DataFrame,
     df_prod: pd.DataFrame,
-    df_recent: pd.DataFrame,
     df_first: pd.DataFrame,
-    qualifying_skus: set,
 ) -> pd.DataFrame:
     if df_sku_size.empty:
         return pd.DataFrame()
@@ -223,15 +226,36 @@ def _compute_sku_level(
             category_l4=("category_l4", "first"),
             supplier_name=("supplier_name", "first"),
             image_url=("image_url", "first"),
+            product_manager=("product_manager", "first"),
         )
         .reset_index()
     )
 
     sku_agg["return_rate"] = (sku_agg["total_returned"] / sku_agg["total_sold"]).clip(upper=1.0)
 
-    # --- Add recent sales ---
-    sku_agg = sku_agg.merge(df_recent, on="sku_prefix", how="left")
-    sku_agg["recent_sold"] = sku_agg["recent_sold"].fillna(0).astype(int)
+    # --- Product-level rating (weighted average across sizes) ---
+    if "avg_rating" in df_sku_size.columns and "review_count" in df_sku_size.columns:
+        rw = df_sku_size["avg_rating"] * df_sku_size["review_count"]
+        r_agg = pd.DataFrame({
+            "sku_prefix": df_sku_size["sku_prefix"],
+            "_tw": rw,
+            "_rc": df_sku_size["review_count"],
+        }).groupby("sku_prefix").agg(
+            _tw=("_tw", "sum"), product_review_count=("_rc", "sum")
+        ).reset_index()
+        r_agg["product_avg_rating"] = (
+            r_agg["_tw"] / r_agg["product_review_count"].replace(0, 1)
+        ).round(1)
+        r_agg.loc[r_agg["product_review_count"] == 0, "product_avg_rating"] = 0.0
+        sku_agg = sku_agg.merge(
+            r_agg[["sku_prefix", "product_avg_rating", "product_review_count"]],
+            on="sku_prefix", how="left",
+        )
+        sku_agg["product_avg_rating"] = sku_agg["product_avg_rating"].fillna(0.0)
+        sku_agg["product_review_count"] = sku_agg["product_review_count"].fillna(0).astype(int)
+    else:
+        sku_agg["product_avg_rating"] = 0.0
+        sku_agg["product_review_count"] = 0
 
     # --- Add first order date ---
     sku_agg = sku_agg.merge(df_first, on="sku_prefix", how="left")
@@ -253,9 +277,6 @@ def _compute_sku_level(
     # --- Deviation ---
     sku_agg["deviation"] = sku_agg["return_rate"] - sku_agg["category_baseline"]
     sku_agg["deviation_pct"] = sku_agg["deviation"] / sku_agg["category_baseline"].replace(0, 1)
-
-    # --- Qualifying flag: at least one size with >= MIN_RECENT_SALES_PER_SIZE in last 30d ---
-    sku_agg["qualifies"] = sku_agg["sku_prefix"].isin(qualifying_skus)
 
     # --- Channels per SKU ---
     if not df_ret.empty:
@@ -322,7 +343,7 @@ def _compute_sku_level(
         sku_agg["is_rising_star"] = (
             first_order_col.notna()
             & (first_order_col >= cutoff_date)
-            & (sku_agg["recent_sold"] > 0)
+            & (sku_agg["total_sold"] > 0)
         )
     else:
         sku_agg["is_rising_star"] = False

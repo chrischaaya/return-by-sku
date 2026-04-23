@@ -436,6 +436,46 @@ def get_sku_review_comments(sku_prefix: str, limit: int = 200) -> list:
     return list(db["ProductReviews"].aggregate(pipeline))
 
 
+def get_trendyol_review_stats() -> list:
+    """
+    Fetch Trendyol review stats (rating + count) per skuPrefix from scripts.TrendyolReviewStats.
+    Uses hiccupStats for Hiccup's own listings. Falls back to merchantStats.
+    """
+    from pymongo import MongoClient
+    import streamlit as st
+
+    uri = st.secrets.get("MONGO_URI")
+    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
+    try:
+        db = client["scripts"]
+        pipeline = [
+            {"$project": {
+                "_id": 0,
+                "sku_prefix": "$skuPrefix",
+                "review_count": {
+                    "$cond": {
+                        "if": {"$gt": [{"$ifNull": ["$hiccupStats.reviewCount", 0]}, 0]},
+                        "then": "$hiccupStats.reviewCount",
+                        "else": {"$ifNull": ["$merchantStats.reviewCount", 0]},
+                    }
+                },
+                "avg_rating": {
+                    "$cond": {
+                        "if": {"$gt": [{"$ifNull": ["$hiccupStats.reviewCount", 0]}, 0]},
+                        "then": "$hiccupStats.avgRating",
+                        "else": "$merchantStats.avgRating",
+                    }
+                },
+            }},
+            {"$match": {"review_count": {"$gt": 0}}},
+        ]
+        return list(db["TrendyolReviewStats"].aggregate(pipeline))
+    except Exception:
+        return []
+    finally:
+        client.close()
+
+
 def get_daily_orders_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
     """
     Daily order counts per (skuPrefix, size) for multiple SKUs in one query.
