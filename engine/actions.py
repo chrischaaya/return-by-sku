@@ -101,9 +101,12 @@ def save_no_action(sku_prefix: str):
 
 
 def resolve_sku(sku_prefix: str):
-    """Resolve — deletes from SkuActions so it can reappear in Needs Attention."""
+    """Resolve — sets status to 'resolved'. Not excluded from Needs Attention."""
     try:
-        _coll().delete_one({"skuPrefix": sku_prefix})
+        _coll().update_one(
+            {"skuPrefix": sku_prefix},
+            {"$set": {"status": "resolved", "updatedOn": datetime.now(timezone.utc)}},
+        )
     except Exception as e:
         st.error(f"Failed to resolve {sku_prefix}: {e}")
 
@@ -143,7 +146,7 @@ def get_all_actions() -> dict:
 def get_excluded_skus() -> set:
     return {
         doc["skuPrefix"] for doc in _coll().find(
-            {"status": {"$in": ["tracking", "no_action", "dismissed", "resolved"]}},
+            {"status": {"$in": ["tracking", "no_action", "dismissed"]}},
             {"skuPrefix": 1},
         )
     }
