@@ -90,8 +90,8 @@ st.markdown("""<style>
 .progress-card { padding: 12px 14px; border-radius: 6px; background: #fffbeb; border-left: 4px solid #f59e0b; margin-bottom: 6px; font-size: 14px; }
 .new-badge { display: inline-block; background: #22c55e; color: white; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-left: 8px; vertical-align: middle; }
 .sizes-affected { font-size: 13px; color: #666; }
-/* Action tracking: style selectbox to look like a search/selector */
-div[data-testid="stSelectbox"] > div { font-size: 13px; }
+/* Action tracking: compact date inputs */
+div[data-testid="stDateInput"] > div { max-width: 160px; }
 </style>""", unsafe_allow_html=True)
 
 # --- Header ---
@@ -962,25 +962,49 @@ with tab_track:
                 action_doc = tracking_data[selected_sku]
                 created_on = action_doc.get("createdOn")
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-                td = get_tracking_data(selected_sku, action_iso)
+                # Compute days_back from date inputs (default 90 for 60d view + buffer)
+                _from_key = f"tr_s_{selected_sku}"
+                if _from_key in st.session_state:
+                    from datetime import date as _dt
+                    _days = (_dt.today() - st.session_state[_from_key]).days + 14
+                else:
+                    _days = 90
+                td = get_tracking_data(selected_sku, action_iso, days_back=_days)
 
                 last_14d = td["last_14d_rate"]
                 last_14d_str = f"{last_14d:.1%}" if last_14d is not None and last_14d > 0 else ("No data" if last_14d is None or last_14d == 0 else f"{last_14d:.1%}")
                 lifetime_str = f"{selected_item['lifetime']:.1%}"
                 pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
 
-                # Header block: product info + metrics + action — all as one clean HTML block
+                # Header: name + dismiss on same line
+                hc1, hc2 = st.columns([5, 1])
+                with hc1:
+                    st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
+                with hc2:
+                    if st.button("✓ Dismiss", key="dismiss_selected"):
+                        st.session_state["confirm_dismiss"] = selected_sku
+                if st.session_state.get("confirm_dismiss") == selected_sku:
+                    cc1, cc2, cc3 = st.columns([1, 1, 4])
+                    with cc1:
+                        if st.button("Confirm", key="confirm_yes", type="primary"):
+                            dismiss_sku(selected_sku)
+                            st.session_state.pop("track_selected", None)
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.toast(f"Dismissed: {selected_item['name']}")
+                            st.rerun()
+                    with cc2:
+                        if st.button("Cancel", key="confirm_no"):
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.rerun()
+
+                # Action + metrics block
                 st.markdown(
                     f'<div style="margin-bottom:12px;">'
-                    # Product name + meta
-                    f'<div style="font-size:20px; font-weight:700; color:#1a1a1a; line-height:1.3;">{selected_item["name"]}</div>'
-                    f'<div style="font-size:12px; color:#888; margin-top:2px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>'
-                    # Action bar
-                    f'<div style="margin-top:10px; padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px;">'
+                    f'<div style="padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px;">'
                     f'{selected_item["action_summary"]}'
                     f' <span style="color:#aaa;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
                     f'</div>'
-                    # Metrics inline
                     f'<div style="display:flex; gap:24px; margin-top:12px; padding-bottom:12px; border-bottom:1px solid #eee;">'
                     f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{last_14d_str}</div></div>'
                     f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{lifetime_str}</div></div>'
@@ -1007,25 +1031,6 @@ with tab_track:
                         unsafe_allow_html=True,
                     )
 
-                # Dismiss at bottom
-                st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
-                dc1, dc2 = st.columns([1, 5])
-                with dc1:
-                    if st.button("✓ Dismiss", key="dismiss_selected"):
-                        st.session_state["confirm_dismiss"] = selected_sku
-                if st.session_state.get("confirm_dismiss") == selected_sku:
-                    cc1, cc2, cc3 = st.columns([1, 1, 4])
-                    with cc1:
-                        if st.button("Confirm", key="confirm_yes", type="primary"):
-                            dismiss_sku(selected_sku)
-                            st.session_state.pop("track_selected", None)
-                            st.session_state.pop("confirm_dismiss", None)
-                            st.toast(f"Dismissed: {selected_item['name']}")
-                            st.rerun()
-                    with cc2:
-                        if st.button("Cancel", key="confirm_no"):
-                            st.session_state.pop("confirm_dismiss", None)
-                            st.rerun()
             else:
                 st.markdown(
                     '<div style="padding:60px 20px; text-align:center; color:#aaa;">'
