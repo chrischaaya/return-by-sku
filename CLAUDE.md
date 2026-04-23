@@ -1,13 +1,14 @@
-# Return by SKU — Dashboard Project
+# Return by SKU — Investigation Tool
 
 ## Purpose
-Operational dashboard that helps a non-technical team reduce product return rates in fashion e-commerce.
-Not a data exploration tool — a **decision-making tool**. Every screen tells the user what's wrong, why, and what to do.
+Operational dashboard for a non-technical team to reduce product return rates in fashion e-commerce.
+Two core workflows: investigate problematic products (Needs Attention) and track impact of actions taken (Action Tracking).
 
 ## Tech Stack
-- **Python 3.11+** / Streamlit
-- **MongoDB** (read-only against `hiccup-prod`)
-- No frontend framework, no build step
+- **Python 3.9+** / Streamlit 1.50
+- **MongoDB**: hiccup-app (orders, returns, products), hiccup-ff (POs), hiccup-tools (settings, actions cache), scripts (TrendyolReviewStats)
+- **Plotly** for action tracking graphs
+- **Anthropic API** for sidebar AI chat
 
 ## Quick Start
 ```bash
@@ -18,50 +19,84 @@ streamlit run dashboard/app.py
 
 ## Project Structure
 ```
-config.py                 # Thresholds, connection, excluded channels
+config.py                 # Thresholds, connection, excluded channels (dynamic from MongoDB)
 engine/
-  connection.py           # MongoDB connection singleton
-  pipelines.py            # Aggregation pipelines (returns + orders)
-  analyzer.py             # Anomaly detection, scoring, trend analysis
-  recommender.py          # Translates analysis → plain English actions
+  connection.py           # MongoDB connection singleton (hiccup-app)
+  pipelines.py            # All MongoDB aggregation pipelines
+  analyzer.py             # Joins returns+orders, computes metrics, baselines
+  tracking.py             # Action tracking: rolling return rates, PO lookup, badges
+  recommender.py          # Size-level and SKU-level action recommendations
+  actions.py              # SkuActions CRUD (hiccup-tools)
+  cache.py                # DataFrame cache in MongoDB (hiccup-tools.DataCache)
+  settings.py             # Settings CRUD (hiccup-tools.Settings)
 dashboard/
-  app.py                  # Streamlit entry point + "Update Data" button
-  pages/
-    1_executive_summary.py
-    2_sku_deep_dive.py
-    3_supplier_scorecard.py
-    4_category_overview.py
-  components/
-    insight_card.py       # Reusable problem→why→action card
-    filters.py            # Date range, channel, category selectors
-docs/                     # Architecture, data model, metrics, recommendations
-tests/                    # Test scenarios with fixture data
+  app.py                  # Streamlit entry point — all UI
+  chat_context.md         # Business context for AI chat
+docs/                     # Architecture, data model, metrics, specs
 ```
 
-## Data Rules (CRITICAL — do not change without discussion)
-1. Return rates computed from `CustomerReturns` collection, NOT pre-computed tables
-2. Only count items where `items.status` is `ACCEPTED` or `PENDING`
-3. Only products with `merchantKey: "hiccup"` (Lykia's own inventory)
-4. Exclude channels: `aboutYou`, `vogaCloset`
-5. Exclude last 7 days of order data (delivery lag — items not yet deliverable)
-6. Minimum 20 units sold per size for size-level flagging
-7. Return reason: use `items.claim.reasonCode` first, fall back to `items.claim.reasonKey`
-8. No grading analysis, no financial impact calculations
-9. Use `createdOn` for all date logic — NEVER `updatedOn` (unreliable, bulk-touched)
+## Tabs
+1. **Needs Attention** — all products with return issues. Cards with size breakdown, return reasons, customer fit, reviews.
+2. **Action Tracking** — split layout: product list (left) + return rate graph (right). Timeline of actions, PO markers, Resolved/New Action CTAs.
+3. **Parked** — products marked "no action possible".
 
-## Channels with Return Reason Data
-Full coverage: trendyol, fashiondays, fashiondaysBG, hepsiburada, emag, trendyolRO
-Partial: hiccup (newer returns only)
-None: namshi, debenhams, tiktokShop, amazonUS, amazonUK, allegro
+## Data Rules (CRITICAL)
+1. Return rates from `CustomerReturns` + `Orders` collections
+2. Return statuses counted: `ACCEPTED`, `PENDING`, `REJECTED`
+3. Order statuses counted: `DISPATCHED`, `DELIVERED`, `PROCESSING`
+4. Only `merchantKey: "hiccup"` products (via skuPrefix from Products)
+5. Excluded channels: configurable in settings (stored in hiccup-tools.Settings)
+6. **Returns use `date` field** (not `createdOn` — `createdOn` is unreliable due to bulk Trendyol syncs)
+7. **Action tracking returns grouped by ORDER date** — uses `$lookup` on `orderId` to get original order `createdOn`. A return counts on the day its order was placed, not when the return was filed.
+8. Return reason: `items.claim.reasonCode` first, fall back to `items.claim.reasonKey`
+9. Customer reviews: `originalComment` preferred over `comments` (shows original language)
+10. Product review stats in card view: from `scripts.TrendyolReviewStats` (hiccupStats → merchantStats fallback)
+11. Fast delivery channels (trendyol, hepsiburada): 7-day order lag. Others: 14 days. Both respect excluded channels list.
+12. Action tracking graph: 7-day rolling average, excludes last 7 days, data from Jan 1 of current year.
 
-## Build Commands
-```bash
-pip install -r requirements.txt          # Install dependencies
-streamlit run dashboard/app.py           # Run dashboard locally
-python -m pytest tests/ -v               # Run tests
+## MongoDB Collections Used
+
+| Collection | Database | Purpose |
+|---|---|---|
+| Orders | hiccup-app | Sales data (denominator) |
+| CustomerReturns | hiccup-app | Return data (numerator) — use `date` field |
+| Products | hiccup-app | Product metadata, skuPrefixes, productManager |
+| ProductReviews | hiccup-app | Per-size reviews, fit data, comments |
+| ProductStocks | hiccup-app | Parkpalet warehouse stock levels |
+| TrendyolReviewStats | scripts | Product-level review counts (for card view) |
+| SupplierProductOrders | hiccup-ff | PO data (creation, receipt, per-size quantities) |
+| SkuActions | hiccup-tools | Action tracking state + history |
+| DataCache | hiccup-tools | Cached DataFrames (compressed) |
+| Settings | hiccup-tools | App settings (thresholds, channels, lags) |
+
+## Settings (stored in hiccup-tools.Settings)
+- `filter_threshold` (default 0.0) — which products appear in Needs Attention. 0 = all.
+- `problematic_threshold` (default 1.3) — sizes above this highlighted red.
+- `min_recent_sales_per_size` (default 10) — minimum lifetime sales for a size to qualify.
+- `excluded_channels` — channels excluded from all calculations.
+- `fast_delivery_lag_days` (default 7), `slow_delivery_lag_days` (default 14)
+
+## Action Tracking Data Model (hiccup-tools.SkuActions)
+```javascript
+{
+  skuPrefix: "MBAJ1ZFU01",
+  status: "tracking",           // tracking | resolved | no_action | dismissed
+  actionSummary: "Latest action text",
+  createdOn: ISODate(),
+  updatedOn: ISODate(),
+  overallRateAtAction: 0.21,
+  actions: [                    // Full history, never overwritten
+    {summary: "...", date: ISODate(), overallRate: 0.21},
+    {summary: "...", date: ISODate(), overallRate: 0.18},
+  ]
+}
 ```
+- `tracking` → shown in Action Tracking tab, excluded from Needs Attention
+- `resolved` → removed from Action Tracking, NOT excluded from Needs Attention (can reappear)
+- `no_action` → shown in Parked tab
+- `dismissed` → hidden everywhere
 
-## MongoDB
-- Database: `hiccup-app`
-- Connection: stored in `config.py` (read-only user)
-- Key collections: `CustomerReturns`, `Orders`, `Products`, `ReturnReasons`, `Categories`, `SalesChannels`
+## Deployment
+- GitHub: `chrischaaya/return-by-sku` (main branch)
+- Streamlit Cloud: auto-deploys from main
+- Local: `streamlit run dashboard/app.py` (port 8501)
