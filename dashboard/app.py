@@ -686,7 +686,7 @@ def _render_expanded_graph(r):
     sku = r["sku_prefix"]
     from datetime import date as date_type, timedelta as td_delta
 
-    # Time range + per-size toggle on same row
+    # Time range + per-size toggle
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
     default_start = max(min_date, date_type.today() - td_delta(days=60))
@@ -697,8 +697,12 @@ def _render_expanded_graph(r):
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
 
     df = rolling_df.copy()
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-        df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
+    if isinstance(date_range, (list, tuple)):
+        if len(date_range) == 2:
+            df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
+        elif len(date_range) == 1:
+            # Only start date selected — filter from start, wait for end date
+            df = df[df["date"].dt.date >= date_range[0]]
     if df.empty:
         st.caption("No data in selected range")
         return

@@ -103,7 +103,7 @@ def preload_tracking_batch(cache_key: str, sku_action_pairs_json: str) -> dict:
     now = datetime.now(timezone.utc)
     sku_prefixes = [p[0] for p in pairs]
     earliest_action = min(datetime.fromisoformat(p[1]).replace(tzinfo=timezone.utc) for p in pairs)
-    graph_start = min(earliest_action - timedelta(days=30), now - timedelta(days=180))
+    graph_start = earliest_action - timedelta(days=30)
 
     all_orders = pipelines.get_daily_orders_for_skus(sku_prefixes, graph_start, now)
     all_returns = pipelines.get_daily_returns_for_skus(sku_prefixes, graph_start, now)
@@ -131,7 +131,7 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     action_date = datetime.fromisoformat(action_date_str).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
 
-    graph_start = min(action_date - timedelta(days=30), now - timedelta(days=180))
+    graph_start = action_date - timedelta(days=30)
 
     # Use preloaded data if available, otherwise fetch individually
     if _preloaded and sku_prefix in _preloaded:
