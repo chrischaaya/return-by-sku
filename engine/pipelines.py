@@ -224,90 +224,6 @@ def get_all_orders_by_sku() -> list:
     return list(results)
 
 
-def get_recent_sales_by_sku_size() -> list:
-    """
-    Last 30 days of sales at (skuPrefix, size) level.
-    Used to determine which SKUs qualify (>=MIN_RECENT_SALES_PER_SIZE per size).
-    Uses same channel-specific lag logic.
-    """
-    db = get_db()
-    hiccup_skus = get_hiccup_sku_prefixes()
-    if not hiccup_skus:
-        return []
-
-    results = []
-    now = datetime.now(timezone.utc)
-
-    # Fast channels
-    fast_start = now - timedelta(days=30 + config.FAST_DELIVERY_LAG_DAYS)
-    fast_end = _cutoff_fast()
-    fast_pipeline = [
-        {
-            "$match": {
-                "createdOn": {"$gte": fast_start, "$lte": fast_end},
-                "salesChannel": {"$in": config.FAST_DELIVERY_CHANNELS},
-                "status": {"$in": config.VALID_ORDER_STATUSES},
-            }
-        },
-        {"$unwind": "$lineItems"},
-        {"$match": {"lineItems.skuPrefix": {"$in": hiccup_skus}}},
-        {
-            "$group": {
-                "_id": {
-                    "skuPrefix": "$lineItems.skuPrefix",
-                    "size": "$lineItems.size",
-                },
-                "recent_sold": {"$sum": "$lineItems.quantity"},
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "sku_prefix": "$_id.skuPrefix",
-                "size": "$_id.size",
-                "recent_sold": 1,
-            }
-        },
-    ]
-    results.extend(db[config.COLL_ORDERS].aggregate(fast_pipeline, allowDiskUse=True))
-
-    # Slow channels
-    all_excluded = config.EXCLUDED_CHANNELS + config.FAST_DELIVERY_CHANNELS
-    slow_start = now - timedelta(days=30 + config.SLOW_DELIVERY_LAG_DAYS)
-    slow_end = _cutoff_slow()
-    slow_pipeline = [
-        {
-            "$match": {
-                "createdOn": {"$gte": slow_start, "$lte": slow_end},
-                "salesChannel": {"$nin": all_excluded},
-                "status": {"$in": config.VALID_ORDER_STATUSES},
-            }
-        },
-        {"$unwind": "$lineItems"},
-        {"$match": {"lineItems.skuPrefix": {"$in": hiccup_skus}}},
-        {
-            "$group": {
-                "_id": {
-                    "skuPrefix": "$lineItems.skuPrefix",
-                    "size": "$lineItems.size",
-                },
-                "recent_sold": {"$sum": "$lineItems.quantity"},
-            }
-        },
-        {
-            "$project": {
-                "_id": 0,
-                "sku_prefix": "$_id.skuPrefix",
-                "size": "$_id.size",
-                "recent_sold": 1,
-            }
-        },
-    ]
-    results.extend(db[config.COLL_ORDERS].aggregate(slow_pipeline, allowDiskUse=True))
-
-    return list(results)
-
-
 def get_sku_first_order_dates() -> list:
     """
     Get the earliest order date per skuPrefix.
@@ -366,6 +282,7 @@ def get_product_metadata() -> list:
                     "$arrayElemAt": ["$productVariants.images.image", 0]
                 },
                 "sizes": "$sizes",
+                "product_manager": "$productManager.name",
             }
         },
     ]
@@ -436,4 +353,214 @@ def get_parkpalet_stock() -> list:
 
     return list(db["ProductStocks"].aggregate(pipeline, allowDiskUse=True))
 
+
+def get_product_reviews() -> list:
+    """
+    Average rating, review count, and fit breakdown per (skuPrefix, size).
+    Fit values: TRUE_TO_SIZE, SMALL, LARGE.
+    """
+    db = get_db()
+    hiccup_skus = get_hiccup_sku_prefixes()
+    if not hiccup_skus:
+        return []
+
+    pipeline = [
+        {
+            "$match": {
+                "status": "PUBLISHED",
+                "isDeleted": False,
+                "skuPrefix": {"$in": hiccup_skus},
+            }
+        },
+        {
+            "$group": {
+                "_id": {"skuPrefix": "$skuPrefix", "size": "$size"},
+                "avg_rating": {"$avg": "$rating"},
+                "review_count": {"$sum": 1},
+                "fit_true": {
+                    "$sum": {"$cond": [{"$eq": ["$fit", "TRUE_TO_SIZE"]}, 1, 0]}
+                },
+                "fit_small": {
+                    "$sum": {"$cond": [{"$eq": ["$fit", "SMALL"]}, 1, 0]}
+                },
+                "fit_large": {
+                    "$sum": {"$cond": [{"$eq": ["$fit", "LARGE"]}, 1, 0]}
+                },
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id.skuPrefix",
+                "size": "$_id.size",
+                "avg_rating": {"$round": ["$avg_rating", 1]},
+                "review_count": 1,
+                "fit_true": 1,
+                "fit_small": 1,
+                "fit_large": 1,
+            }
+        },
+    ]
+    return list(db["ProductReviews"].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_sku_review_comments(sku_prefix: str, limit: int = 200) -> list:
+    """
+    Fetch individual review comments for a specific SKU, most recent first.
+    """
+    db = get_db()
+    pipeline = [
+        {
+            "$match": {
+                "skuPrefix": sku_prefix,
+                "status": "PUBLISHED",
+                "isDeleted": False,
+            }
+        },
+        {"$sort": {"createdOn": -1}},
+        {"$limit": limit},
+        {
+            "$project": {
+                "_id": 0,
+                "size": 1,
+                "rating": 1,
+                "fit": 1,
+                "comments": 1,
+                "originalComment": 1,
+                "createdOn": 1,
+                "name": 1,
+                "reviewTitle": 1,
+            }
+        },
+    ]
+    return list(db["ProductReviews"].aggregate(pipeline))
+
+
+def get_daily_orders_for_sku(sku_prefix: str, start_date: datetime, end_date: datetime) -> list:
+    """
+    Daily order counts per size for a single SKU.
+    Returns [{date, size, sold}, ...] — one row per (date, size).
+    """
+    db = get_db()
+    pipeline = [
+        {
+            "$match": {
+                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+                "status": {"$in": config.VALID_ORDER_STATUSES},
+            }
+        },
+        {"$unwind": "$lineItems"},
+        {"$match": {"lineItems.skuPrefix": sku_prefix}},
+        {
+            "$group": {
+                "_id": {
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "size": "$lineItems.size",
+                },
+                "sold": {"$sum": "$lineItems.quantity"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "date": "$_id.date",
+                "size": "$_id.size",
+                "sold": 1,
+            }
+        },
+        {"$sort": {"date": 1}},
+    ]
+    return list(db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_daily_returns_for_sku(sku_prefix: str, start_date: datetime, end_date: datetime) -> list:
+    """
+    Daily return counts per size for a single SKU.
+    Returns [{date, size, returned}, ...] — one row per (date, size).
+    """
+    db = get_db()
+    pipeline = [
+        {
+            "$match": {
+                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+            }
+        },
+        {"$unwind": "$items"},
+        {
+            "$match": {
+                "items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES},
+                "items.skuPrefix": sku_prefix,
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "size": "$items.size",
+                },
+                "returned": {"$sum": "$items.quantity"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "date": "$_id.date",
+                "size": "$_id.size",
+                "returned": 1,
+            }
+        },
+        {"$sort": {"date": 1}},
+    ]
+    return list(db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_sku_pos(sku_prefix: str, after_date: datetime) -> list:
+    """
+    Fetch POs from hiccup-ff.SupplierProductOrders created after after_date
+    that have been received at the warehouse.
+    Returns [{created_on, received_on, items: [{size, ordered, received}]}, ...]
+    """
+    from pymongo import MongoClient
+    import streamlit as st
+
+    uri = st.secrets.get("MONGO_FF_URI", st.secrets.get("MONGO_URI"))
+    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
+    try:
+        db = client["hiccup-ff"]
+        pipeline = [
+            {
+                "$match": {
+                    "skuPrefix": sku_prefix,
+                    "createdOn": {"$gt": after_date},
+                    "warehouseTransactionDate": {"$exists": True, "$ne": None},
+                    "status": {"$nin": ["ORDER_CANCELLED"]},
+                }
+            },
+            {"$sort": {"warehouseTransactionDate": 1}},
+            {
+                "$project": {
+                    "_id": 0,
+                    "created_on": "$createdOn",
+                    "received_on": "$warehouseTransactionDate",
+                    "items": {
+                        "$map": {
+                            "input": "$items",
+                            "as": "item",
+                            "in": {
+                                "size": "$$item.size",
+                                "ordered": "$$item.ordered",
+                                "received": "$$item.received",
+                            },
+                        }
+                    },
+                }
+            },
+        ]
+        return list(db["SupplierProductOrders"].aggregate(pipeline))
+    except Exception:
+        return []
+    finally:
+        client.close()
 
