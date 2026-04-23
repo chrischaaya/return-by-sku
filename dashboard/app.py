@@ -672,7 +672,7 @@ def _render_tracking_table(rows):
     """Render the tracking table as HTML."""
     html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
     html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
-    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("New PO Inbound", "center")]:
+    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("PO Inbound", "center"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("", "center")]:
         html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
     html += '</tr>'
 
@@ -694,7 +694,7 @@ def _render_tracking_table(rows):
             change = '<span style="color:#aaa;">waiting for stock</span>'
 
         pm_str = f" · {r['pm']}" if r.get("pm") else ""
-        action_text = r.get("action_summary", "").replace('"', '&quot;')
+        action_text = r.get("action_summary", "").replace('"', '&quot;').replace("'", "&#39;").replace("<", "&lt;").replace(">", "&gt;")
         created = r.get("created_on")
         date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
 
@@ -707,11 +707,12 @@ def _render_tracking_table(rows):
         html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
         html += f'<td style="padding:8px; text-align:center; width:44px;">{img_html}</td>'
         html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; white-space:nowrap;">{date_str} <span title="{action_text}" style="cursor:help; color:#aaa;">&#9432;</span></td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; white-space:nowrap;">{date_str} <span title="{action_text}" style="cursor:help; color:#aaa; font-size:14px;">&#x24D8;</span></td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px;">{po_info or "<span style=color:#aaa;>no PO yet</span>"}</td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{before}</td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{after}</td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:15px;">{change}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px;">{po_info or "<span style=&quot;color:#aaa;&quot;>no PO yet</span>"}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; width:30px;" data-sku="{r["sku_prefix"]}"></td>'
         html += '</tr>'
 
     html += '</table>'
@@ -1013,6 +1014,19 @@ with tab_track:
         # ── Table ──
         st.caption(f"{len(tracking_rows)} products being tracked")
         st.markdown(_render_tracking_table(tracking_rows), unsafe_allow_html=True)
+
+        # Dismiss action
+        dc1, dc2 = st.columns([4, 1])
+        with dc1:
+            dismiss_options = {f"{r['name']} ({r['sku_prefix']})": r['sku_prefix'] for r in tracking_rows}
+            dismiss_sel = st.selectbox("Dismiss a product", [""] + list(dismiss_options.keys()), key="track_dismiss", label_visibility="collapsed")
+        with dc2:
+            if st.button("Dismiss", disabled=not dismiss_sel):
+                if dismiss_sel and dismiss_sel in dismiss_options:
+                    sku = dismiss_options[dismiss_sel]
+                    dismiss_sku(sku)
+                    st.toast(f"Dismissed: {dismiss_sel}")
+                    st.rerun()
 
 # =====================================================================
 # TAB 3: PARKED
