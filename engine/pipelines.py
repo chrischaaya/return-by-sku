@@ -496,7 +496,7 @@ def get_returns_count_for_skus(sku_prefixes: list, start_date: datetime, end_dat
     if not sku_prefixes:
         return {}
     pipeline = [
-        {"$match": {"createdOn": {"$gte": start_date, "$lte": end_date}, "salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
+        {"$match": {"date": {"$gte": start_date, "$lte": end_date}, "salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
         {"$unwind": "$items"},
         {"$match": {"items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES}, "items.skuPrefix": {"$in": sku_prefixes}}},
         {"$group": {"_id": "$items.skuPrefix", "returned": {"$sum": "$items.quantity"}}},
@@ -594,7 +594,7 @@ def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_dat
     pipeline = [
         {
             "$match": {
-                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "date": {"$gte": start_date, "$lte": end_date},
                 "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
             }
         },
@@ -609,7 +609,7 @@ def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_dat
             "$group": {
                 "_id": {
                     "skuPrefix": "$items.skuPrefix",
-                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$date"}},
                     "size": "$items.size",
                 },
                 "returned": {"$sum": "$items.quantity"},
@@ -675,7 +675,7 @@ def get_daily_returns_for_sku(sku_prefix: str, start_date: datetime, end_date: d
     pipeline = [
         {
             "$match": {
-                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "date": {"$gte": start_date, "$lte": end_date},
                 "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
             }
         },
@@ -689,7 +689,7 @@ def get_daily_returns_for_sku(sku_prefix: str, start_date: datetime, end_date: d
         {
             "$group": {
                 "_id": {
-                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$date"}},
                     "size": "$items.size",
                 },
                 "returned": {"$sum": "$items.quantity"},
