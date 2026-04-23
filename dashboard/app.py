@@ -1014,27 +1014,40 @@ with tab_track:
                             st.toast("Action added!")
                             st.rerun()
 
-                # Action timeline
+                # Action timeline (collapsed by default, expandable)
                 actions_list = action_doc.get("actions", [])
                 if not actions_list:
-                    # Legacy: single action, no history array
                     actions_list = [{"summary": selected_item["action_summary"], "date": created_on}]
 
-                timeline_html = '<div style="margin:10px 0 12px; border-left:2px solid #f59e0b; padding-left:12px;">'
-                for i, act in enumerate(reversed(actions_list)):
+                show_all_actions = st.session_state.get(f"show_all_actions_{selected_sku}", False)
+                reversed_actions = list(reversed(actions_list))
+                visible_actions = reversed_actions if show_all_actions else reversed_actions[:3]
+
+                timeline_html = '<div style="margin:10px 0 8px; border-left:2px solid #f59e0b; padding-left:12px; max-height:200px; overflow-y:auto;">'
+                for i, act in enumerate(visible_actions):
                     a_date = act.get("date")
                     a_str = a_date.strftime("%d %b %Y") if a_date and hasattr(a_date, "strftime") else "—"
                     a_days = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(a_date, tz="UTC")).days if a_date else 0
                     dot_color = "#f59e0b" if i == 0 else "#ddd"
+                    summary = act.get("summary", "")
+                    # Truncate long text unless expanded
+                    if not show_all_actions and len(summary) > 150:
+                        summary = summary[:150] + "..."
                     timeline_html += (
                         f'<div style="position:relative; padding:4px 0 8px; font-size:12px;">'
                         f'<div style="position:absolute; left:-18px; top:6px; width:10px; height:10px; border-radius:50%; background:{dot_color}; border:2px solid white;"></div>'
-                        f'<div style="font-weight:600; color:#333;">{act.get("summary", "")}</div>'
+                        f'<div style="color:#333;">{summary}</div>'
                         f'<div style="color:#999; font-size:11px;">{a_str} ({a_days}d ago)</div>'
                         f'</div>'
                     )
                 timeline_html += '</div>'
                 st.markdown(timeline_html, unsafe_allow_html=True)
+
+                if len(actions_list) > 3:
+                    label = f"Show all {len(actions_list)} actions" if not show_all_actions else "Show less"
+                    if st.button(label, key=f"toggle_actions_{selected_sku}"):
+                        st.session_state[f"show_all_actions_{selected_sku}"] = not show_all_actions
+                        st.rerun()
 
                 # Graph or monitoring message
                 selected_item["_last14_str"] = last_14d_str
