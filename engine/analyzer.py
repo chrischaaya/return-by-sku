@@ -125,8 +125,8 @@ def load_data() -> dict:
             on="sku_prefix", how="left",
         )
         has_ty = df_sku["ty_review_count"].notna() & (df_sku["ty_review_count"] > 0)
-        df_sku.loc[has_ty, "product_review_count"] = df_sku.loc[has_ty, "ty_review_count"].astype(int)
-        df_sku.loc[has_ty, "product_avg_rating"] = df_sku.loc[has_ty, "ty_avg_rating"]
+        df_sku.loc[has_ty, "product_review_count"] = df_sku.loc[has_ty, "ty_review_count"].fillna(0).astype(int)
+        df_sku.loc[has_ty, "product_avg_rating"] = df_sku.loc[has_ty, "ty_avg_rating"].fillna(0).round(1)
         df_sku.drop(columns=["ty_review_count", "ty_avg_rating"], inplace=True, errors="ignore")
 
     # --- Supplier level ---
