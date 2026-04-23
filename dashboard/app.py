@@ -107,68 +107,65 @@ with h3:
 
 use_turkish = False
 
-# --- Settings panel ---
-if show_settings:
-    st.session_state["show_settings"] = not st.session_state.get("show_settings", False)
 
-if st.session_state.get("show_settings"):
-    with st.container(border=True):
-        st.markdown("**⚙️ Settings**")
-        s = load_settings()
+# --- Settings dialog ---
+@st.dialog("Settings", width="large")
+def _show_settings():
+    s = load_settings()
 
-        # --- What gets flagged ---
-        st.caption("Thresholds")
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            s["filter_threshold"] = st.number_input("Filter threshold", 0.0, 2.0, float(s.get("filter_threshold", 0.0)), 0.1, help="Which products appear. 0 = all. 1.0 = above median. 1.3 = 30% above median.")
-        with c2:
-            s["problematic_threshold"] = st.number_input("Problematic threshold", 0.0, 2.0, float(s.get("problematic_threshold", 1.3)), 0.1, help="Sizes above this are highlighted red. 1.3 = 30% above category median.")
-        with c3:
-            s["min_recent_sales_per_size"] = st.number_input("Min sales/size", 1, 100, int(s["min_recent_sales_per_size"]), help="A size needs this many lifetime sales to be included.")
-        with c4:
-            s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
-        s["new_product_min_sales_per_size"] = s["min_recent_sales_per_size"]
+    st.caption("Thresholds")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        s["filter_threshold"] = st.number_input("Filter threshold", 0.0, 2.0, float(s.get("filter_threshold", 0.0)), 0.1, help="Which products appear. 0 = all. 1.0 = above median. 1.3 = 30% above median.")
+    with c2:
+        s["problematic_threshold"] = st.number_input("Problematic threshold", 0.0, 2.0, float(s.get("problematic_threshold", 1.3)), 0.1, help="Sizes above this are highlighted red. 1.3 = 30% above category median.")
+    with c3:
+        s["min_recent_sales_per_size"] = st.number_input("Min sales/size", 1, 100, int(s["min_recent_sales_per_size"]), help="A size needs this many lifetime sales to be included.")
+    with c4:
+        s["new_product_max_age_days"] = st.number_input("New product window (days)", 7, 180, int(s.get("new_product_max_age_days", 45)), help="Products first sold within this many days appear in the New Products tab.")
+    s["new_product_min_sales_per_size"] = s["min_recent_sales_per_size"]
 
-        # --- Data filters ---
-        st.caption("Data filters")
-        c5, c6, c7 = st.columns(3)
-        with c5:
-            s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
-        with c6:
-            s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
-        all_channels = [
-            "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
-            "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
-            "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
-            "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
-        ]
-        st.caption("Excluded channels")
-        exc_c1, exc_c2, exc_c3 = st.columns([4, 0.6, 0.6])
-        with exc_c2:
-            if st.button("All", use_container_width=True, help="Exclude all channels"):
-                st.session_state["_exc_ch"] = all_channels
-                st.rerun()
-        with exc_c3:
-            if st.button("Clear", use_container_width=True, help="Include all channels"):
-                st.session_state["_exc_ch"] = []
-                st.rerun()
-        with exc_c1:
-            if "_exc_ch" not in st.session_state:
-                st.session_state["_exc_ch"] = s["excluded_channels"]
-            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=None, key="_exc_ch", label_visibility="collapsed", help="Completely excluded from all calculations.")
-
-        if st.button("Save & recalculate", type="primary", use_container_width=True):
-            save_settings(s)
-            config.reload_settings()
-            # Clear ALL caches (tracking, summaries, reviews, etc.)
-            st.cache_data.clear()
-            with st.spinner("Recalculating with new settings..."):
-                st.session_state["data"] = load_data()
-                save_cache(st.session_state["data"])
-                st.session_state.pop("computed", None)
-            st.session_state["show_settings"] = False
-            st.toast("Settings saved and data recalculated!")
+    st.caption("Data filters")
+    c5, c6 = st.columns(2)
+    with c5:
+        s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
+    with c6:
+        s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
+    all_channels = [
+        "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
+        "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
+        "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
+        "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
+    ]
+    st.caption("Excluded channels")
+    exc_c1, exc_c2, exc_c3 = st.columns([4, 0.6, 0.6])
+    with exc_c2:
+        if st.button("All", use_container_width=True, help="Exclude all channels"):
+            st.session_state["_exc_ch"] = all_channels
             st.rerun()
+    with exc_c3:
+        if st.button("Clear", use_container_width=True, help="Include all channels"):
+            st.session_state["_exc_ch"] = []
+            st.rerun()
+    with exc_c1:
+        if "_exc_ch" not in st.session_state:
+            st.session_state["_exc_ch"] = s["excluded_channels"]
+        s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=None, key="_exc_ch", label_visibility="collapsed", help="Completely excluded from all calculations.")
+
+    if st.button("Save & recalculate", type="primary", use_container_width=True):
+        save_settings(s)
+        config.reload_settings()
+        st.cache_data.clear()
+        with st.spinner("Recalculating with new settings..."):
+            st.session_state["data"] = load_data()
+            save_cache(st.session_state["data"])
+            st.session_state.pop("computed", None)
+        st.toast("Settings saved and data recalculated!")
+        st.rerun()
+
+
+if show_settings:
+    _show_settings()
 
 # --- Load data ---
 if should_update:
