@@ -372,7 +372,6 @@ def _compute_supplier_level(df_sku: pd.DataFrame) -> pd.DataFrame:
             total_skus=("sku_prefix", "nunique"),
             total_sold=("total_sold", "sum"),
             total_returned=("total_returned", "sum"),
-            recent_sold=("recent_sold", "sum"),
         )
         .reset_index()
     )
