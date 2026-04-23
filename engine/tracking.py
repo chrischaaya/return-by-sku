@@ -43,13 +43,18 @@ def get_tracking_data(sku_prefix: str, action_date_str: str) -> dict:
     # Build complete date range
     date_range = pd.date_range(graph_start.date(), now.date(), freq="D")
 
+    # Minimum sales in a 7-day window to show a data point (suppresses noise)
+    MIN_WINDOW_SOLD = 3  # overall
+    MIN_WINDOW_SOLD_SIZE = 2  # per size
+
     # Compute rolling 7-day return rate per size + overall
     rolling_rows = []
+    size_total_sold = {s: 0 for s in all_sizes}
+
     for d in date_range:
         d_str = d.strftime("%Y-%m-%d")
         w_start = (d - timedelta(days=7)).strftime("%Y-%m-%d")
 
-        # Window sold/returned
         sold_window = df_ord[(df_ord["date"] > w_start) & (df_ord["date"] <= d_str)]
         ret_window = df_ret[(df_ret["date"] > w_start) & (df_ret["date"] <= d_str)] if not df_ret.empty else pd.DataFrame(columns=["date", "size", "returned"])
 
@@ -58,19 +63,34 @@ def get_tracking_data(sku_prefix: str, action_date_str: str) -> dict:
 
         row = {
             "date": d_str,
-            "overall_rate": min(total_returned / total_sold, 1.0) if total_sold > 0 else None,
+            "overall_rate": min(total_returned / total_sold, 1.0) if total_sold >= MIN_WINDOW_SOLD else None,
             "overall_sold": int(total_sold),
         }
 
         for size in all_sizes:
             s_sold = sold_window[sold_window["size"] == size]["sold"].sum()
             s_ret = ret_window[ret_window["size"] == size]["returned"].sum() if not ret_window.empty else 0
-            row[f"rate_{size}"] = min(s_ret / s_sold, 1.0) if s_sold > 0 else None
+            size_total_sold[size] += s_sold
+            row[f"rate_{size}"] = min(s_ret / s_sold, 1.0) if s_sold >= MIN_WINDOW_SOLD_SIZE else None
 
         rolling_rows.append(row)
 
     rolling_df = pd.DataFrame(rolling_rows)
     rolling_df["date"] = pd.to_datetime(rolling_df["date"])
+
+    # Only keep sizes with meaningful total volume (top sizes covering 95% of sales)
+    sorted_sizes = sorted(all_sizes, key=lambda s: size_total_sold[s], reverse=True)
+    cumulative = 0
+    total_all = sum(size_total_sold.values())
+    visible_sizes = []
+    for s in sorted_sizes:
+        if size_total_sold[s] == 0:
+            continue
+        visible_sizes.append(s)
+        cumulative += size_total_sold[s]
+        if total_all > 0 and cumulative / total_all >= 0.95:
+            break
+    all_sizes = visible_sizes
 
     # Last 14 days rate (simple, not rolling)
     lag_days = config.SLOW_DELIVERY_LAG_DAYS

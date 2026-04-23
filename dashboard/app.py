@@ -734,7 +734,7 @@ def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
     days_filter = st.session_state.get(tf_key, 90)
     df = rolling_df.copy()
     if days_filter > 0:
-        cutoff = pd.Timestamp.now(tz="UTC") - pd.Timedelta(days=days_filter)
+        cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
         df = df[df["date"] >= cutoff]
 
     if df.empty:
@@ -766,24 +766,32 @@ def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
         ))
 
     if action_date:
-        fig.add_vline(
-            x=action_date, line_dash="dash", line_color="#f59e0b", line_width=2,
-            annotation_text="ACTION", annotation_position="top left",
-            annotation_font_color="#f59e0b", annotation_font_size=10,
-        )
+        ad_str = action_date.strftime("%Y-%m-%d") if hasattr(action_date, "strftime") else str(action_date)[:10]
+        fig.add_shape(type="line", x0=ad_str, x1=ad_str, y0=0, y1=1, yref="paper", line=dict(color="#f59e0b", width=2, dash="dash"))
+        fig.add_annotation(x=ad_str, y=1, yref="paper", text="ACTION", showarrow=False, font=dict(color="#f59e0b", size=10), yshift=10)
 
     for po in td["pos"]:
         received = po.get("received_on")
         if received:
+            r_str = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
             units = sum(item.get("received", 0) for item in po.get("items", []))
-            fig.add_vline(
-                x=received, line_dash="dash", line_color="#16a34a", line_width=2,
-                annotation_text=f"PO ({units}u)", annotation_position="top right",
-                annotation_font_color="#16a34a", annotation_font_size=10,
-            )
+            fig.add_shape(type="line", x0=r_str, x1=r_str, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
+            fig.add_annotation(x=r_str, y=1, yref="paper", text=f"PO ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
+
+    # Smart Y-axis: cap at P95 of visible values + 5pp headroom, minimum 10%
+    all_vals = df["overall_rate"].dropna().tolist()
+    for size in td["sizes"]:
+        col = f"rate_{size}"
+        if col in df.columns:
+            all_vals.extend(df[col].dropna().tolist())
+    if all_vals:
+        p95 = sorted(all_vals)[int(len(all_vals) * 0.95)] if len(all_vals) > 5 else max(all_vals)
+        y_max = max(min(p95 + 0.05, 1.0), 0.10)  # at least 10%, cap at 100%
+    else:
+        y_max = 0.5
 
     fig.update_layout(
-        yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0"),
+        yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0"),
         height=360,
         margin=dict(t=30, b=40, l=50, r=20),
@@ -936,8 +944,22 @@ with tab_track:
     if not tracking_data:
         st.info("No actions taken yet. Mark products as 'Action taken' from the Needs Attention tab.")
     else:
-        st.caption(f"{len(tracking_data)} products being tracked")
-        for sku_prefix, action_doc in sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True):
+        track_search = st.text_input("Search", placeholder="Search by product name or SKU...", key="track_search", label_visibility="collapsed")
+
+        # Sort by action date (most recent first) and apply search
+        sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
+        if track_search:
+            q = track_search.lower()
+            filtered = []
+            for sku_prefix, action_doc in sorted_tracking:
+                row = df_sku[df_sku["sku_prefix"] == sku_prefix]
+                name = row.iloc[0]["product_name"] if not row.empty else ""
+                if q in sku_prefix.lower() or q in str(name).lower():
+                    filtered.append((sku_prefix, action_doc))
+            sorted_tracking = filtered
+
+        st.caption(f"{len(sorted_tracking)} products being tracked")
+        for sku_prefix, action_doc in sorted_tracking:
             render_tracking_card(sku_prefix, action_doc)
 
 # =====================================================================
