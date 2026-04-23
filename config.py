@@ -35,12 +35,12 @@ _s = _load()
 
 FILTER_THRESHOLD = _s.get("filter_threshold", 0.0)
 PROBLEMATIC_THRESHOLD = _s.get("problematic_threshold", 1.3)
-MIN_RECENT_SALES_PER_SIZE = _s["min_recent_sales_per_size"]
+MIN_RECENT_SALES_PER_SIZE = _s.get("min_recent_sales_per_size", 10)
 RISING_STAR_MIN_SALES_PER_SIZE = _s.get("new_product_min_sales_per_size", 5)
 RISING_STAR_MAX_AGE_DAYS = _s.get("new_product_max_age_days", 45)
-FAST_DELIVERY_LAG_DAYS = _s["fast_delivery_lag_days"]
-SLOW_DELIVERY_LAG_DAYS = _s["slow_delivery_lag_days"]
-EXCLUDED_CHANNELS = _s["excluded_channels"]
+FAST_DELIVERY_LAG_DAYS = _s.get("fast_delivery_lag_days", 7)
+SLOW_DELIVERY_LAG_DAYS = _s.get("slow_delivery_lag_days", 14)
+EXCLUDED_CHANNELS = _s.get("excluded_channels", ["aboutYou", "vogaCloset"])
 
 
 def reload_settings():
