@@ -146,33 +146,30 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
 
     date_idx = pd.date_range(graph_start.date(), now.date(), freq="D")
 
-    # Overall daily totals
+    # Daily totals
     ord_daily = df_ord.groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
     ret_daily = df_ret.groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
 
-    # Rolling 7-day sums (vectorized)
-    MIN_WINDOW_SOLD = 5
-    ord_roll = ord_daily.rolling(7, min_periods=1).sum()
-    ret_roll = ret_daily.rolling(7, min_periods=1).sum()
-    overall_rate = (ret_roll / ord_roll).where(ord_roll >= MIN_WINDOW_SOLD)
-    overall_rate = overall_rate.clip(upper=1.0)
+    # Rolling 3-day return rate (falls back to 2d, then 1d if not enough data)
+    ord_roll = ord_daily.rolling(3, min_periods=1).sum()
+    ret_roll = ret_daily.rolling(3, min_periods=1).sum()
+    overall_rate = (ret_roll / ord_roll).where(ord_roll > 0).clip(upper=1.0)
 
     rolling_df = pd.DataFrame({"date": date_idx, "overall_rate": overall_rate.values, "overall_sold": ord_roll.values.astype(int)})
 
-    # Per-size rolling rates (vectorized per size)
+    # Per-size rolling 3-day rates
     all_sizes_set = set(df_ord["size"].unique())
     if not df_ret.empty:
         all_sizes_set |= set(df_ret["size"].unique())
     all_sizes = sorted(all_sizes_set)
 
-    MIN_WINDOW_SOLD_SIZE = 5
     size_total_sold = {}
     for size in all_sizes:
         s_ord = df_ord[df_ord["size"] == size].groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
         s_ret = df_ret[df_ret["size"] == size].groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
-        s_ord_roll = s_ord.rolling(7, min_periods=1).sum()
-        s_ret_roll = s_ret.rolling(7, min_periods=1).sum()
-        rate = (s_ret_roll / s_ord_roll).where(s_ord_roll >= MIN_WINDOW_SOLD_SIZE).clip(upper=1.0)
+        s_ord_roll = s_ord.rolling(3, min_periods=1).sum()
+        s_ret_roll = s_ret.rolling(3, min_periods=1).sum()
+        rate = (s_ret_roll / s_ord_roll).where(s_ord_roll > 0).clip(upper=1.0)
         rolling_df[f"rate_{size}"] = rate.values
         size_total_sold[size] = int(s_ord.sum())
 
