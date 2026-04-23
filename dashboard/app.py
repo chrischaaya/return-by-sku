@@ -143,14 +143,19 @@ if st.session_state.get("show_settings"):
             "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
         ]
         st.caption("Excluded channels")
-        exc_c1, exc_c2 = st.columns([4, 1])
-        with exc_c1:
-            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=s["excluded_channels"], label_visibility="collapsed", help="Completely excluded from all calculations.")
+        exc_c1, exc_c2, exc_c3 = st.columns([4, 0.6, 0.6])
         with exc_c2:
-            if st.button("Select all", use_container_width=True):
-                s["excluded_channels"] = all_channels
-                st.session_state["excluded_channels"] = all_channels
+            if st.button("All", use_container_width=True, help="Exclude all channels"):
+                st.session_state["_exc_ch"] = all_channels
                 st.rerun()
+        with exc_c3:
+            if st.button("Clear", use_container_width=True, help="Include all channels"):
+                st.session_state["_exc_ch"] = []
+                st.rerun()
+        with exc_c1:
+            if "_exc_ch" not in st.session_state:
+                st.session_state["_exc_ch"] = s["excluded_channels"]
+            s["excluded_channels"] = st.multiselect("Excluded channels", options=all_channels, default=None, key="_exc_ch", label_visibility="collapsed", help="Completely excluded from all calculations.")
 
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
