@@ -888,14 +888,8 @@ with tab_track:
     else:
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Fast summaries for table: simple count queries (~1s), not daily aggregations (~7s)
-        import json
-        pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
-        cache_key = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}_{','.join(sorted(s for s, _ in sorted_tracking))}"
-        summaries = get_tracking_summaries(cache_key, json.dumps(pairs))
-
-        # Build table rows (fast — uses summaries + df_sku already in memory)
-        tracking_rows = []
+        # Build list items (fast — from df_sku in memory + action docs)
+        tracking_items = []
         for sku_prefix, action_doc in sorted_tracking:
             row = df_sku[df_sku["sku_prefix"] == sku_prefix]
             name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
@@ -905,102 +899,108 @@ with tab_track:
             lifetime = float(row.iloc[0]["return_rate"]) if not row.empty else 0
             created_on = action_doc.get("createdOn")
             days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
-            s = summaries.get(sku_prefix, {})
-            tracking_rows.append({
+            date_str = created_on.strftime("%d %b") if created_on and hasattr(created_on, "strftime") else "—"
+            tracking_items.append({
                 "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
                 "supplier": supplier, "pm": pm, "lifetime": lifetime,
                 "action_summary": action_doc.get("actionSummary", "N/A"),
-                "created_on": created_on, "days_ago": days_ago,
-                "pre_po": s.get("pre_po"), "last_14d": s.get("last_14d"),
-                "change_pp": s.get("change_pp"), "po_info": s.get("po_info", ""),
-                "badge": s.get("badge", "WAITING"),
+                "created_on": created_on, "days_ago": days_ago, "date_str": date_str,
+                "label": f"{name} ({sku_prefix})",
             })
 
-        # ── Graph section: on-demand for one product ──
-        graph_search = st.text_input("Analyze product", placeholder="Type product name or SKU to load its return rate trend...", key="track_graph_search", label_visibility="collapsed")
+        # ── Split layout: list left, graph right ──
+        left_col, right_col = st.columns([1, 2])
 
-        graph_sku = None
-        if graph_search:
-            q = graph_search.lower()
-            for r in tracking_rows:
-                if q in r["sku_prefix"].lower() or q in str(r["name"]).lower():
-                    graph_sku = r["sku_prefix"]
-                    break
+        with left_col:
+            track_search = st.text_input("Search", placeholder="Search products...", key="track_search", label_visibility="collapsed")
+            display_items = tracking_items
+            if track_search:
+                q = track_search.lower()
+                display_items = [i for i in display_items if q in i["sku_prefix"].lower() or q in str(i["name"]).lower()]
 
-        if graph_sku:
-            graph_row = next(r for r in tracking_rows if r["sku_prefix"] == graph_sku)
-            action_doc = tracking_data[graph_sku]
-            created_on = action_doc.get("createdOn")
-            action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-            with st.spinner("Loading trend..."):
-                td = get_tracking_data(graph_sku, action_iso)
-            graph_row["td"] = td
+            st.caption(f"{len(display_items)} tracked")
 
-            mc1, mc2, mc3, mc4 = st.columns(4)
-            with mc1:
-                st.metric("Last 14 days", f"{td['last_14d_rate']:.1%}" if td["last_14d_rate"] is not None else "—")
-            with mc2:
-                st.metric("Pre-PO (30d)", f"{td['pre_po_rate']:.1%}" if td["pre_po_rate"] is not None else "—")
-            with mc3:
-                st.metric("Lifetime", f"{graph_row['lifetime']:.1%}")
-            with mc4:
-                if td["pos"]:
-                    p = td["pos"][0]
-                    u = sum(i.get("received", 0) for i in p.get("items", []))
-                    d = p["received_on"]
-                    st.metric("New PO Inbound", f"{d.strftime('%d %b') if hasattr(d, 'strftime') else str(d)[:10]} ({u}u)")
+            for item in display_items:
+                sku = item["sku_prefix"]
+                is_selected = st.session_state.get("track_selected") == sku
+                if is_selected:
+                    border = "border-left:3px solid #1a73e8; background:#f0f6ff;"
                 else:
-                    st.metric("New PO Inbound", "No PO yet")
+                    border = "border-left:3px solid transparent;"
 
-            _render_expanded_graph(graph_row)
-        elif graph_search:
-            st.warning(f"No tracked product matching '{graph_search}'")
-        else:
-            st.markdown(
-                '<div style="padding:20px; text-align:center; color:#aaa; background:#f8fafc; border-radius:8px; border:1px dashed #ddd;">'
-                'Search for a product above to analyze its return rate trend'
-                '</div>',
-                unsafe_allow_html=True,
-            )
+                with st.container():
+                    if st.button(
+                        f"**{item['name']}**\n{item['sku_prefix']} · {item['supplier']}\nAction: {item['date_str']}",
+                        key=f"track_sel_{sku}",
+                        use_container_width=True,
+                    ):
+                        st.session_state["track_selected"] = sku
+                        st.rerun()
 
-        st.markdown("---")
+        # Auto-select first if nothing selected
+        if st.session_state.get("track_selected") not in {i["sku_prefix"] for i in tracking_items} and tracking_items:
+            st.session_state["track_selected"] = tracking_items[0]["sku_prefix"]
 
-        # ── Table ──
-        st.caption(f"{len(tracking_rows)} products being tracked")
+        with right_col:
+            selected_sku = st.session_state.get("track_selected")
+            selected_item = next((i for i in tracking_items if i["sku_prefix"] == selected_sku), None)
 
-        # Header
-        hc = st.columns([0.5, 3, 2, 1.2, 1.2, 0.8])
-        hc[0].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;"></div>', unsafe_allow_html=True)
-        hc[1].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Product</div>', unsafe_allow_html=True)
-        hc[2].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Action</div>', unsafe_allow_html=True)
-        hc[3].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Action date</div>', unsafe_allow_html=True)
-        hc[4].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">PO Inbound</div>', unsafe_allow_html=True)
-        hc[5].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;"></div>', unsafe_allow_html=True)
+            if selected_item:
+                # Header + dismiss
+                hc1, hc2 = st.columns([5, 1])
+                with hc1:
+                    st.markdown(f"**{selected_item['name']}**")
+                    pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
+                    st.caption(f"{selected_item['sku_prefix']} · {selected_item['supplier']}{pm_str}")
+                with hc2:
+                    if st.button("Dismiss", key="dismiss_selected"):
+                        dismiss_sku(selected_sku)
+                        st.session_state.pop("track_selected", None)
+                        st.toast(f"Dismissed: {selected_item['name']}")
+                        st.rerun()
 
-        for r in tracking_rows:
-            rc = st.columns([0.5, 3, 2, 1.2, 1.2, 0.8])
-            with rc[0]:
-                if r.get("img_url") and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
-                    st.image(r["img_url"], width=36)
-            with rc[1]:
-                st.markdown(f"**{r['name']}**")
-                pm_str = f" · {r['pm']}" if r.get("pm") else ""
-                st.caption(f"{r['sku_prefix']} · {r['supplier']}{pm_str}")
-            with rc[2]:
-                st.markdown(f'<div style="font-size:12px;">{r["action_summary"]}</div>', unsafe_allow_html=True)
-            with rc[3]:
-                created = r.get("created_on")
-                date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
-                st.markdown(f'<div style="font-size:12px; text-align:center;">{date_str}</div>', unsafe_allow_html=True)
-            with rc[4]:
-                po_info = r.get("po_info", "")
-                st.markdown(f'<div style="font-size:12px; text-align:center;">{po_info or "<span style=color:#aaa;>no PO yet</span>"}</div>', unsafe_allow_html=True)
-            with rc[5]:
-                if st.button("Dismiss", key=f"dismiss_{r['sku_prefix']}"):
-                    dismiss_sku(r["sku_prefix"])
-                    st.toast(f"Dismissed: {r['name']}")
-                    st.rerun()
-            st.markdown('<hr style="margin:0; border:none; border-top:1px solid #eee;">', unsafe_allow_html=True)
+                # Action summary
+                st.markdown(
+                    f'<div style="padding:8px 12px; background:#fffbeb; border-left:3px solid #f59e0b; border-radius:4px; font-size:12px; margin-bottom:12px;">'
+                    f'<b>Action:</b> {selected_item["action_summary"]}'
+                    f' <span style="color:#888;">· {selected_item["date_str"]} ({selected_item["days_ago"]}d ago)</span>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+
+                # Load graph data on demand
+                action_doc = tracking_data[selected_sku]
+                created_on = action_doc.get("createdOn")
+                action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
+                td = get_tracking_data(selected_sku, action_iso)
+
+                # Metrics
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                with mc1:
+                    st.metric("Last 14 days", f"{td['last_14d_rate']:.1%}" if td["last_14d_rate"] is not None else "—")
+                with mc2:
+                    st.metric("Pre-PO (30d)", f"{td['pre_po_rate']:.1%}" if td["pre_po_rate"] is not None else "—")
+                with mc3:
+                    st.metric("Lifetime", f"{selected_item['lifetime']:.1%}")
+                with mc4:
+                    if td["pos"]:
+                        p = td["pos"][0]
+                        u = sum(i.get("received", 0) for i in p.get("items", []))
+                        d = p["received_on"]
+                        st.metric("PO Inbound", f"{d.strftime('%d %b') if hasattr(d, 'strftime') else str(d)[:10]} ({u}u)")
+                    else:
+                        st.metric("PO Inbound", "No PO yet")
+
+                # Graph
+                selected_item["td"] = td
+                _render_expanded_graph(selected_item)
+            else:
+                st.markdown(
+                    '<div style="padding:40px; text-align:center; color:#aaa;">'
+                    'Select a product from the list to see its return rate trend'
+                    '</div>',
+                    unsafe_allow_html=True,
+                )
 
 # =====================================================================
 # TAB 3: PARKED
