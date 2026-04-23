@@ -101,12 +101,9 @@ def save_no_action(sku_prefix: str):
 
 
 def resolve_sku(sku_prefix: str):
-    """Mark as resolved — removes from Action Tracking."""
+    """Resolve — deletes from SkuActions so it can reappear in Needs Attention."""
     try:
-        _coll().update_one(
-            {"skuPrefix": sku_prefix},
-            {"$set": {"status": "resolved", "updatedOn": datetime.now(timezone.utc)}},
-        )
+        _coll().delete_one({"skuPrefix": sku_prefix})
     except Exception as e:
         st.error(f"Failed to resolve {sku_prefix}: {e}")
 
