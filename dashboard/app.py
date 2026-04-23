@@ -691,7 +691,11 @@ def _render_expanded_graph(r):
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
     default_start = max(min_date, date_type.today() - td_delta(days=60))
-    tfc = st.columns([0.6, 0.6, 0.5, 4])
+    # Get metrics from the caller (passed via r dict)
+    _last14 = r.get("_last14_str", "—")
+    _lifetime = r.get("_lifetime_str", "—")
+
+    tfc = st.columns([0.6, 0.6, 0.5, 1.5, 1.5, 1])
     with tfc[0]:
         start_d = st.date_input("From", value=default_start, min_value=min_date, max_value=max_date, key=f"tr_s_{sku}")
     with tfc[1]:
@@ -699,6 +703,10 @@ def _render_expanded_graph(r):
     with tfc[2]:
         st.markdown('<div style="height:29px;"></div>', unsafe_allow_html=True)
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=True)
+    with tfc[4]:
+        st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:20px; font-weight:700;">{_last14}</div></div>', unsafe_allow_html=True)
+    with tfc[5]:
+        st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:20px; font-weight:700;">{_lifetime}</div></div>', unsafe_allow_html=True)
 
     df = rolling_df.copy()
     df = df[(df["date"].dt.date >= start_d) & (df["date"].dt.date <= end_d)]
@@ -761,7 +769,7 @@ def _render_expanded_graph(r):
     fig.update_layout(
         yaxis=dict(tickformat=".0%", title="", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0", range=[x_min, x_max]),
-        height=320, margin=dict(t=20, b=30, l=40, r=10),
+        height=480, margin=dict(t=20, b=40, l=40, r=10),
         plot_bgcolor="white", legend=dict(orientation="h", y=-0.25), hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
@@ -1023,16 +1031,9 @@ with tab_track:
                 timeline_html += '</div>'
                 st.markdown(timeline_html, unsafe_allow_html=True)
 
-                # Metrics
-                st.markdown(
-                    f'<div style="display:flex; gap:24px; margin-top:8px; padding-bottom:12px; border-bottom:1px solid #eee;">'
-                    f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{last_14d_str}</div></div>'
-                    f'<div><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:22px; font-weight:700; color:#1a1a1a;">{lifetime_str}</div></div>'
-                    f'</div>',
-                    unsafe_allow_html=True,
-                )
-
                 # Graph or monitoring message
+                selected_item["_last14_str"] = last_14d_str
+                selected_item["_lifetime_str"] = lifetime_str
                 rolling_df = td.get("rolling_df", pd.DataFrame())
                 has_data = not rolling_df.empty and rolling_df["overall_rate"].notna().sum() >= 7
 
