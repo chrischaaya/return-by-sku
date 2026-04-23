@@ -922,56 +922,34 @@ with tab_track:
         left_col, right_col = st.columns([1, 2])
 
         with left_col:
-            options = [i["sku_prefix"] for i in tracking_items]
-            name_map = {i["sku_prefix"]: i["name"] for i in tracking_items}
-
-            if options:
-                # Selectbox = the interaction mechanism (searchable dropdown)
-                st.selectbox(
-                    "Select product",
-                    options=options,
-                    format_func=lambda s: f"{name_map.get(s, s)} — {s}",
-                    key="track_selected",
-                    label_visibility="collapsed",
-                )
+            if tracking_items:
+                # Auto-select first if nothing selected
+                if "track_selected" not in st.session_state or st.session_state["track_selected"] not in {i["sku_prefix"] for i in tracking_items}:
+                    st.session_state["track_selected"] = tracking_items[0]["sku_prefix"]
 
                 st.caption(f"{len(tracking_items)} tracked")
 
-                # Visual list — HTML cards matching mockup
-                selected_sku_val = st.session_state.get("track_selected", options[0])
-                list_html = '<div style="max-height:500px; overflow-y:auto; border:1px solid #e5e7eb; border-radius:8px;">'
-                for item in tracking_items:
-                    is_sel = item["sku_prefix"] == selected_sku_val
-                    if is_sel:
-                        card_style = "border-left:3px solid #1a73e8; background:#eff6ff;"
-                    else:
-                        card_style = "border-left:3px solid transparent;"
-
-                    img_html = ""
-                    if item.get("img_url") and isinstance(item["img_url"], str) and item["img_url"].startswith("http"):
-                        img_html = f'<div style="flex-shrink:0;"><img src="{item["img_url"]}" style="width:36px; height:46px; object-fit:cover; border-radius:4px;"></div>'
-                    else:
-                        img_html = '<div style="flex-shrink:0; width:36px; height:46px; background:#f3f4f6; border-radius:4px;"></div>'
-
-                    po_line = f'PO: <b>{item["po_str"]}</b>' if item["po_str"] else '<span style="color:#bbb;">PO: no PO yet</span>'
-
-                    if not item["in_data"]:
-                        name_style = "color:#999;"
-                    else:
-                        name_style = ""
-
-                    list_html += (
-                        f'<div style="padding:10px 12px; {card_style} border-bottom:1px solid #f0f0f0;">'
-                        f'<div style="display:flex; gap:10px; align-items:center;">'
-                        f'{img_html}'
-                        f'<div style="flex:1; min-width:0;">'
-                        f'<div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; {name_style}">{item["name"]}</div>'
-                        f'<div style="font-size:11px; color:#888; margin-top:1px;">{item["sku_prefix"]} · {item["supplier"]}</div>'
-                        f'<div style="font-size:11px; color:#666; margin-top:4px;">Action: <b>{item["date_str"]}</b> · {po_line}</div>'
-                        f'</div></div></div>'
-                    )
-                list_html += '</div>'
-                st.markdown(list_html, unsafe_allow_html=True)
+                # Scrollable list with View buttons
+                with st.container(height=500):
+                    for item in tracking_items:
+                        sku = item["sku_prefix"]
+                        is_sel = st.session_state.get("track_selected") == sku
+                        with st.container(border=True):
+                            c1, c2, c3 = st.columns([0.4, 3, 0.8])
+                            with c1:
+                                if item.get("img_url") and isinstance(item["img_url"], str) and item["img_url"].startswith("http"):
+                                    st.image(item["img_url"], width=36)
+                            with c2:
+                                st.markdown(f"**{item['name']}**")
+                                po_line = f"PO: {item['po_str']}" if item["po_str"] else "PO: no PO yet"
+                                st.caption(f"{sku} · {item['supplier']} · Action: {item['date_str']} · {po_line}")
+                            with c3:
+                                if is_sel:
+                                    st.markdown('<div style="padding:4px 0; text-align:center; font-size:12px; color:#1a73e8; font-weight:600;">Viewing</div>', unsafe_allow_html=True)
+                                else:
+                                    if st.button("View", key=f"view_{sku}", use_container_width=True):
+                                        st.session_state["track_selected"] = sku
+                                        st.rerun()
 
         with right_col:
             selected_sku = st.session_state.get("track_selected")
