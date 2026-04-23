@@ -977,9 +977,29 @@ with tab_track:
                 lifetime_str = f"{selected_item['lifetime']:.1%}"
                 pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
 
-                # Header
-                st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
-                st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
+                # Header + CTAs on same row
+                hdr1, hdr2, hdr3 = st.columns([4, 1, 1])
+                with hdr1:
+                    st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
+                with hdr2:
+                    if st.button("✓ Resolved", key="resolve_selected"):
+                        resolve_sku(selected_sku)
+                        st.session_state.pop("track_selected", None)
+                        st.toast(f"Resolved: {selected_item['name']}")
+                        st.rerun()
+                with hdr3:
+                    if st.button("+ New Action", key="new_action_btn"):
+                        st.session_state["new_action_modal"] = selected_sku
+
+                if st.session_state.get("new_action_modal") == selected_sku:
+                    new_txt = st.text_area("What action was taken?", key=f"new_act_txt_{selected_sku}", placeholder="e.g. Sent revised measurements to supplier")
+                    if st.button("Submit", key="new_act_submit"):
+                        if new_txt and new_txt.strip():
+                            add_new_action(selected_sku, new_txt.strip(), selected_item["lifetime"])
+                            st.session_state.pop("new_action_modal", None)
+                            st.toast("Action added!")
+                            st.rerun()
 
                 # Action timeline
                 actions_list = action_doc.get("actions", [])
@@ -1002,27 +1022,6 @@ with tab_track:
                     )
                 timeline_html += '</div>'
                 st.markdown(timeline_html, unsafe_allow_html=True)
-
-                # CTAs: Resolved + New Action
-                cta1, cta2, cta3 = st.columns([1, 1, 3])
-                with cta1:
-                    if st.button("✓ Resolved", key="resolve_selected"):
-                        resolve_sku(selected_sku)
-                        st.session_state.pop("track_selected", None)
-                        st.toast(f"Resolved: {selected_item['name']}")
-                        st.rerun()
-                with cta2:
-                    if st.button("+ New Action", key="new_action_btn"):
-                        st.session_state["new_action_modal"] = selected_sku
-
-                if st.session_state.get("new_action_modal") == selected_sku:
-                    new_txt = st.text_area("What action was taken?", key=f"new_act_txt_{selected_sku}", placeholder="e.g. Sent revised measurements to supplier")
-                    if st.button("Submit", key="new_act_submit"):
-                        if new_txt and new_txt.strip():
-                            add_new_action(selected_sku, new_txt.strip(), selected_item["lifetime"])
-                            st.session_state.pop("new_action_modal", None)
-                            st.toast("Action added!")
-                            st.rerun()
 
                 # Metrics
                 st.markdown(
