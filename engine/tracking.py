@@ -131,7 +131,7 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     action_date = datetime.fromisoformat(action_date_str).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
 
-    graph_start = action_date - timedelta(days=30)
+    graph_start = now - timedelta(days=360)
 
     # Use preloaded data if available, otherwise fetch individually
     if _preloaded and sku_prefix in _preloaded:
