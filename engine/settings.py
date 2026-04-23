@@ -17,12 +17,11 @@ _write_client = None
 
 DEFAULTS = {
     # What gets flagged
-    "trigger_multiplier": 1.3,
+    "filter_threshold": 0.0,
+    "problematic_threshold": 1.3,
     "min_recent_sales_per_size": 10,
     "new_product_min_sales_per_size": 5,
     "new_product_max_age_days": 45,
-    "min_reasons_bestsellers": 20,
-    "min_reasons_new_products": 10,
     # Data filters
     "fast_delivery_lag_days": 7,
     "slow_delivery_lag_days": 14,

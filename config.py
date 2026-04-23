@@ -33,12 +33,11 @@ from engine.settings import load_settings as _load
 
 _s = _load()
 
-TRIGGER_MULTIPLIER = _s.get("trigger_multiplier", 1.3)
+FILTER_THRESHOLD = _s.get("filter_threshold", 0.0)
+PROBLEMATIC_THRESHOLD = _s.get("problematic_threshold", 1.3)
 MIN_RECENT_SALES_PER_SIZE = _s["min_recent_sales_per_size"]
 RISING_STAR_MIN_SALES_PER_SIZE = _s.get("new_product_min_sales_per_size", 5)
 RISING_STAR_MAX_AGE_DAYS = _s.get("new_product_max_age_days", 45)
-MIN_SIZE_VOLUME = _s.get("min_reasons_bestsellers", 20)
-MIN_SIZE_VOLUME_RISING = _s.get("min_reasons_new_products", 10)
 FAST_DELIVERY_LAG_DAYS = _s["fast_delivery_lag_days"]
 SLOW_DELIVERY_LAG_DAYS = _s["slow_delivery_lag_days"]
 EXCLUDED_CHANNELS = _s["excluded_channels"]
@@ -46,16 +45,15 @@ EXCLUDED_CHANNELS = _s["excluded_channels"]
 
 def reload_settings():
     """Reload settings from MongoDB and update module-level variables."""
-    global TRIGGER_MULTIPLIER, MIN_RECENT_SALES_PER_SIZE, RISING_STAR_MIN_SALES_PER_SIZE
-    global RISING_STAR_MAX_AGE_DAYS, FAST_DELIVERY_LAG_DAYS, SLOW_DELIVERY_LAG_DAYS
-    global MIN_SIZE_VOLUME, MIN_SIZE_VOLUME_RISING, EXCLUDED_CHANNELS
+    global FILTER_THRESHOLD, PROBLEMATIC_THRESHOLD, MIN_RECENT_SALES_PER_SIZE
+    global RISING_STAR_MIN_SALES_PER_SIZE, RISING_STAR_MAX_AGE_DAYS
+    global FAST_DELIVERY_LAG_DAYS, SLOW_DELIVERY_LAG_DAYS, EXCLUDED_CHANNELS
     s = _load()
-    TRIGGER_MULTIPLIER = s.get("trigger_multiplier", 1.3)
+    FILTER_THRESHOLD = s.get("filter_threshold", 0.0)
+    PROBLEMATIC_THRESHOLD = s.get("problematic_threshold", 1.3)
     MIN_RECENT_SALES_PER_SIZE = s["min_recent_sales_per_size"]
     RISING_STAR_MIN_SALES_PER_SIZE = s.get("new_product_min_sales_per_size", 5)
     RISING_STAR_MAX_AGE_DAYS = s.get("new_product_max_age_days", 45)
-    MIN_SIZE_VOLUME = s.get("min_reasons_bestsellers", 20)
-    MIN_SIZE_VOLUME_RISING = s.get("min_reasons_new_products", 10)
     FAST_DELIVERY_LAG_DAYS = s["fast_delivery_lag_days"]
     SLOW_DELIVERY_LAG_DAYS = s["slow_delivery_lag_days"]
     EXCLUDED_CHANNELS = s["excluded_channels"]

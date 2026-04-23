@@ -18,7 +18,7 @@ WRITE_URI = (
 
 _write_client = None
 
-CACHE_KEYS = ["df_sku", "df_sku_size", "df_supplier", "df_category", "df_recent_size"]
+CACHE_KEYS = ["df_sku", "df_sku_size", "df_supplier", "df_category"]
 
 
 def _get_db():

@@ -21,14 +21,9 @@ def size_action(
     is_flagged: bool,
     stock: int = 0,
     sold: int = 0,
-    reason_count: int = 0,
-    min_reasons: int = 10,
 ) -> str:
     if not is_flagged:
         return ""
-
-    if reason_count < min_reasons:
-        return "• High return rate. Not enough data to diagnose. Inspect product."
 
     issues = []
     sizing_total = pct_small + pct_large
