@@ -684,22 +684,21 @@ def _render_expanded_graph(r):
         return
 
     sku = r["sku_prefix"]
-    tf_key = f"tf_{sku}"
-    tfc = st.columns([1, 1, 1, 3, 3])
+    from datetime import date as date_type
+
+    # Time range filter + per-size toggle
+    tfc = st.columns([2, 2, 2])
+    min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - timedelta(days=90)
+    max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
+    default_start = max(min_date, date_type.today() - timedelta(days=60))
     with tfc[0]:
-        if st.button("30d", key=f"{tf_key}_30"): st.session_state[tf_key] = 30
-    with tfc[1]:
-        if st.button("90d", key=f"{tf_key}_90"): st.session_state[tf_key] = 90
+        date_range = st.date_input("Time range", value=(default_start, max_date), min_value=min_date, max_value=max_date, key=f"tr_{sku}", label_visibility="collapsed")
     with tfc[2]:
-        if st.button("All", key=f"{tf_key}_all"): st.session_state[tf_key] = 0
-    with tfc[4]:
         show_sizes = st.checkbox("Per-size lines", key=f"sizes_{sku}", value=False)
 
-    days_filter = st.session_state.get(tf_key, 30)
     df = rolling_df.copy()
-    if days_filter > 0:
-        cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
-        df = df[df["date"] >= cutoff]
+    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+        df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
     if df.empty:
         st.caption("No data in selected range")
         return
@@ -724,16 +723,18 @@ def _render_expanded_graph(r):
     action_date = r["created_on"]
     if action_date:
         ad_str = action_date.strftime("%Y-%m-%d") if hasattr(action_date, "strftime") else str(action_date)[:10]
+        ad_label = action_date.strftime("%d %b") if hasattr(action_date, "strftime") else ad_str
         fig.add_shape(type="line", x0=ad_str, x1=ad_str, y0=0, y1=1, yref="paper", line=dict(color="#f59e0b", width=2, dash="dash"))
-        fig.add_annotation(x=ad_str, y=1, yref="paper", text="ACTION", showarrow=False, font=dict(color="#f59e0b", size=10), yshift=10)
+        fig.add_annotation(x=ad_str, y=1, yref="paper", text=f"ACTION ({ad_label})", showarrow=False, font=dict(color="#f59e0b", size=10), yshift=10)
 
     for po in td["pos"]:
         received = po.get("received_on")
         if received:
             rs = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
+            rs_label = received.strftime("%d %b") if hasattr(received, "strftime") else rs
             units = sum(it.get("received", 0) for it in po.get("items", []))
             fig.add_shape(type="line", x0=rs, x1=rs, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
-            fig.add_annotation(x=rs, y=1, yref="paper", text=f"PO INBOUND ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
+            fig.add_annotation(x=rs, y=1, yref="paper", text=f"PO INBOUND {rs_label} ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
 
     all_vals = df["overall_rate"].dropna().tolist()
     if show_sizes:
@@ -750,21 +751,10 @@ def _render_expanded_graph(r):
     fig.update_layout(
         yaxis=dict(tickformat=".0%", title="", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0"),
-        height=300, margin=dict(t=20, b=30, l=40, r=10),
-        plot_bgcolor="white", legend=dict(orientation="h", y=-0.2), hovermode="x unified",
+        height=320, margin=dict(t=20, b=30, l=40, r=10),
+        plot_bgcolor="white", legend=dict(orientation="h", y=-0.15), hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
-
-    # Compact summary
-    parts = []
-    if action_date:
-        parts.append(f'<span style="color:#f59e0b;">●</span> Action: {action_date.strftime("%d %b %Y")}')
-    for po in td["pos"]:
-        ro = po.get("received_on")
-        u = sum(it.get("received", 0) for it in po.get("items", []))
-        parts.append(f'<span style="color:#16a34a;">●</span> Stock: {ro.strftime("%d %b") if hasattr(ro, "strftime") else str(ro)[:10]} ({u}u)')
-    parts.append(f'Lifetime: {r["lifetime"]:.1%}')
-    st.markdown(f'<div style="font-size:11px; color:#888;">{" · ".join(parts)}</div>', unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -981,29 +971,33 @@ with tab_track:
             selected_item = next((i for i in tracking_items if i["sku_prefix"] == selected_sku), None)
 
             if selected_item:
-                # Header + dismiss with confirmation
-                hc1, hc2 = st.columns([5, 1])
-                with hc1:
-                    st.markdown(f"### {selected_item['name']}")
-                    pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
-                    st.caption(f"{selected_item['sku_prefix']} · {selected_item['supplier']}{pm_str}")
-                with hc2:
+                # Header + dismiss
+                st.markdown(
+                    f'<div style="display:flex; justify-content:space-between; align-items:flex-start;">'
+                    f'<div><h3 style="margin:0;">{selected_item["name"]}</h3>'
+                    f'<div style="font-size:12px; color:#888; margin-top:2px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}'
+                    f'{" · PM: " + selected_item["pm"] if selected_item["pm"] else ""}</div></div>'
+                    f'</div>',
+                    unsafe_allow_html=True,
+                )
+                dc1, dc2, dc3 = st.columns([6, 1, 1])
+                with dc2:
                     if st.button("Dismiss", key="dismiss_selected"):
                         st.session_state["confirm_dismiss"] = selected_sku
-                    if st.session_state.get("confirm_dismiss") == selected_sku:
-                        st.warning("Remove from tracking?")
-                        dc1, dc2 = st.columns(2)
-                        with dc1:
-                            if st.button("Confirm", key="confirm_yes", type="primary"):
-                                dismiss_sku(selected_sku)
-                                st.session_state.pop("track_selected", None)
-                                st.session_state.pop("confirm_dismiss", None)
-                                st.toast(f"Dismissed: {selected_item['name']}")
-                                st.rerun()
-                        with dc2:
-                            if st.button("Cancel", key="confirm_no"):
-                                st.session_state.pop("confirm_dismiss", None)
-                                st.rerun()
+                if st.session_state.get("confirm_dismiss") == selected_sku:
+                    st.warning("Remove from tracking?")
+                    cc1, cc2, cc3 = st.columns([4, 1, 1])
+                    with cc2:
+                        if st.button("Confirm", key="confirm_yes", type="primary"):
+                            dismiss_sku(selected_sku)
+                            st.session_state.pop("track_selected", None)
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.toast(f"Dismissed: {selected_item['name']}")
+                            st.rerun()
+                    with cc3:
+                        if st.button("Cancel", key="confirm_no"):
+                            st.session_state.pop("confirm_dismiss", None)
+                            st.rerun()
 
                 # Action summary
                 st.markdown(
