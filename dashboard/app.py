@@ -672,13 +672,15 @@ def _render_tracking_table(rows):
     """Render the tracking table as HTML."""
     html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
     html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
-    for col, align in [("", "center"), ("Product", "left"), ("Action taken", "left"), ("Return %", "center"), ("When", "center")]:
+    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("Return %", "center")]:
         html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
     html += '</tr>'
 
     for r in rows:
-        action_short = r["action_summary"][:60] + ("..." if len(r["action_summary"]) > 60 else "")
         pm_str = f" · {r['pm']}" if r["pm"] else ""
+        action_text = r["action_summary"].replace('"', '&quot;')
+        created = r.get("created_on")
+        date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
 
         img_html = ""
         if r.get("img_url") and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
@@ -687,9 +689,8 @@ def _render_tracking_table(rows):
         html += f'<tr style="border-bottom:1px solid #eee;">'
         html += f'<td style="padding:8px; text-align:center; width:44px;">{img_html}</td>'
         html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
-        html += f'<td style="padding:10px 8px;"><div style="font-size:12px;">{action_short}</div></td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; white-space:nowrap;">{date_str} <span title="{action_text}" style="cursor:help; color:#aaa;">&#9432;</span></td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{r["lifetime"]:.1%}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; color:#888;">{r["days_ago"]}d ago</td>'
         html += '</tr>'
 
     html += '</table>'
@@ -754,7 +755,7 @@ def _render_expanded_graph(r):
             rs = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
             units = sum(it.get("received", 0) for it in po.get("items", []))
             fig.add_shape(type="line", x0=rs, x1=rs, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
-            fig.add_annotation(x=rs, y=1, yref="paper", text=f"NEW STOCK ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
+            fig.add_annotation(x=rs, y=1, yref="paper", text=f"PO INBOUND ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
 
     all_vals = df["overall_rate"].dropna().tolist()
     if show_sizes:
@@ -964,9 +965,9 @@ with tab_track:
                     p = td["pos"][0]
                     u = sum(i.get("received", 0) for i in p.get("items", []))
                     d = p["received_on"]
-                    st.metric("New Stock", f"{d.strftime('%d %b') if hasattr(d, 'strftime') else str(d)[:10]} ({u}u)")
+                    st.metric("New PO Inbound", f"{d.strftime('%d %b') if hasattr(d, 'strftime') else str(d)[:10]} ({u}u)")
                 else:
-                    st.metric("New Stock", "No PO yet")
+                    st.metric("New PO Inbound", "No PO yet")
 
             _render_expanded_graph(graph_row)
         elif graph_search:
