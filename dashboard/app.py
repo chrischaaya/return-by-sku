@@ -938,11 +938,17 @@ with tab_track:
                 if "track_selected" not in st.session_state or st.session_state["track_selected"] not in {i["sku_prefix"] for i in tracking_items}:
                     st.session_state["track_selected"] = tracking_items[0]["sku_prefix"]
 
-                st.caption(f"{len(tracking_items)} tracked")
+                track_search = st.text_input("Search", placeholder="Filter by name or SKU...", key="track_search", label_visibility="collapsed")
+                display_items = tracking_items
+                if track_search:
+                    q = track_search.lower()
+                    display_items = [i for i in tracking_items if q in i["sku_prefix"].lower() or q in str(i["name"]).lower()]
+
+                st.caption(f"{len(display_items)} tracked")
 
                 # Scrollable list with View buttons
                 with st.container(height=500):
-                    for item in tracking_items:
+                    for item in display_items:
                         sku = item["sku_prefix"]
                         is_sel = st.session_state.get("track_selected") == sku
                         with st.container(border=True):
