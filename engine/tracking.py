@@ -150,9 +150,9 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
     ord_daily = df_ord.groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
     ret_daily = df_ret.groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
 
-    # Rolling 3-day return rate (falls back to 2d, then 1d if not enough data)
-    ord_roll = ord_daily.rolling(3, min_periods=1).sum()
-    ret_roll = ret_daily.rolling(3, min_periods=1).sum()
+    # Rolling 3-day return rate (strict — requires all 3 days)
+    ord_roll = ord_daily.rolling(3, min_periods=3).sum()
+    ret_roll = ret_daily.rolling(3, min_periods=3).sum()
     overall_rate = (ret_roll / ord_roll).where(ord_roll > 0).clip(upper=1.0)
 
     rolling_df = pd.DataFrame({"date": date_idx, "overall_rate": overall_rate.values, "overall_sold": ord_roll.values.astype(int)})
@@ -167,8 +167,8 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
     for size in all_sizes:
         s_ord = df_ord[df_ord["size"] == size].groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
         s_ret = df_ret[df_ret["size"] == size].groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
-        s_ord_roll = s_ord.rolling(3, min_periods=1).sum()
-        s_ret_roll = s_ret.rolling(3, min_periods=1).sum()
+        s_ord_roll = s_ord.rolling(3, min_periods=3).sum()
+        s_ret_roll = s_ret.rolling(3, min_periods=3).sum()
         rate = (s_ret_roll / s_ord_roll).where(s_ord_roll > 0).clip(upper=1.0)
         rolling_df[f"rate_{size}"] = rate.values
         size_total_sold[size] = int(s_ord.sum())
