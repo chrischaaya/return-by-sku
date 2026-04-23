@@ -888,7 +888,12 @@ with tab_track:
     else:
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Build list items (fast — from df_sku in memory + action docs)
+        # Batch PO lookup (fast — one query)
+        from engine.pipelines import get_pos_for_skus
+        po_pairs = [(s, d.get("createdOn", datetime.now(timezone.utc))) for s, d in sorted_tracking]
+        all_pos = get_pos_for_skus(po_pairs)
+
+        # Build list items (fast — from df_sku in memory + action docs + PO dates)
         tracking_items = []
         for sku_prefix, action_doc in sorted_tracking:
             row = df_sku[df_sku["sku_prefix"] == sku_prefix]
@@ -900,12 +905,18 @@ with tab_track:
             created_on = action_doc.get("createdOn")
             days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
             date_str = created_on.strftime("%d %b") if created_on and hasattr(created_on, "strftime") else "—"
+            pos = all_pos.get(sku_prefix, [])
+            if pos:
+                po_d = pos[0]["received_on"]
+                po_str = po_d.strftime("%d %b") if hasattr(po_d, "strftime") else str(po_d)[:10]
+            else:
+                po_str = ""
             tracking_items.append({
                 "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
                 "supplier": supplier, "pm": pm, "lifetime": lifetime,
                 "action_summary": action_doc.get("actionSummary", "N/A"),
                 "created_on": created_on, "days_ago": days_ago, "date_str": date_str,
-                "label": f"{name} ({sku_prefix})",
+                "po_str": po_str,
             })
 
         # ── Split layout: list left, graph right ──
@@ -920,26 +931,34 @@ with tab_track:
 
             st.caption(f"{len(display_items)} tracked")
 
-            for item in display_items:
-                sku = item["sku_prefix"]
-                is_selected = st.session_state.get("track_selected") == sku
-                if is_selected:
-                    border = "border-left:3px solid #1a73e8; background:#f0f6ff;"
-                else:
-                    border = "border-left:3px solid transparent;"
+            # Use radio for selection (clean, native Streamlit)
+            options = [i["sku_prefix"] for i in display_items]
+            labels = {}
+            for i in display_items:
+                labels[i["sku_prefix"]] = i["name"]
 
-                with st.container():
-                    if st.button(
-                        f"**{item['name']}**\n{item['sku_prefix']} · {item['supplier']}\nAction: {item['date_str']}",
-                        key=f"track_sel_{sku}",
-                        use_container_width=True,
-                    ):
-                        st.session_state["track_selected"] = sku
-                        st.rerun()
+            if options:
+                # Build visual list with radio
+                selected_radio = st.radio(
+                    "Select product",
+                    options=options,
+                    format_func=lambda sku: labels.get(sku, sku),
+                    key="track_selected",
+                    label_visibility="collapsed",
+                )
 
-        # Auto-select first if nothing selected
-        if st.session_state.get("track_selected") not in {i["sku_prefix"] for i in tracking_items} and tracking_items:
-            st.session_state["track_selected"] = tracking_items[0]["sku_prefix"]
+                # Render rich info under each radio item using HTML
+                selected_sku_val = st.session_state.get("track_selected", options[0])
+                sel_item = next((i for i in display_items if i["sku_prefix"] == selected_sku_val), None)
+                if sel_item:
+                    po_line = f"PO: <b>{sel_item['po_str']}</b>" if sel_item["po_str"] else "PO: <span style='color:#aaa;'>no PO yet</span>"
+                    st.markdown(
+                        f'<div style="font-size:11px; color:#888; margin-top:-8px; margin-bottom:8px;">'
+                        f'{sel_item["sku_prefix"]} · {sel_item["supplier"]} · '
+                        f'Action: <b>{sel_item["date_str"]}</b> · {po_line}'
+                        f'</div>',
+                        unsafe_allow_html=True,
+                    )
 
         with right_col:
             selected_sku = st.session_state.get("track_selected")
