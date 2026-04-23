@@ -698,7 +698,7 @@ def _render_expanded_graph(r):
         end_d = st.date_input("To", value=max_date, min_value=min_date, max_value=max_date, key=f"tr_e_{sku}")
     with tfc[2]:
         st.markdown('<div style="height:29px;"></div>', unsafe_allow_html=True)
-        show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
+        show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=True)
 
     df = rolling_df.copy()
     df = df[(df["date"].dt.date >= start_d) & (df["date"].dt.date <= end_d)]
