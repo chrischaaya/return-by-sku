@@ -923,42 +923,44 @@ with tab_track:
         left_col, right_col = st.columns([1, 2])
 
         with left_col:
-            track_search = st.text_input("Search", placeholder="Search products...", key="track_search", label_visibility="collapsed")
+            # Selectbox for interaction + search
             display_items = tracking_items
-            if track_search:
-                q = track_search.lower()
-                display_items = [i for i in display_items if q in i["sku_prefix"].lower() or q in str(i["name"]).lower()]
-
-            st.caption(f"{len(display_items)} tracked")
-
-            # Use radio for selection (clean, native Streamlit)
             options = [i["sku_prefix"] for i in display_items]
-            labels = {}
-            for i in display_items:
-                labels[i["sku_prefix"]] = i["name"]
+            name_map = {i["sku_prefix"]: i["name"] for i in display_items}
 
             if options:
-                # Build visual list with radio
-                selected_radio = st.radio(
-                    "Select product",
+                st.selectbox(
+                    "Product",
                     options=options,
-                    format_func=lambda sku: labels.get(sku, sku),
+                    format_func=lambda s: f"{name_map.get(s, s)}",
                     key="track_selected",
                     label_visibility="collapsed",
                 )
 
-                # Render rich info under each radio item using HTML
+                st.caption(f"{len(display_items)} tracked")
+
+                # Visual list — pure HTML matching the mockup
                 selected_sku_val = st.session_state.get("track_selected", options[0])
-                sel_item = next((i for i in display_items if i["sku_prefix"] == selected_sku_val), None)
-                if sel_item:
-                    po_line = f"PO: <b>{sel_item['po_str']}</b>" if sel_item["po_str"] else "PO: <span style='color:#aaa;'>no PO yet</span>"
-                    st.markdown(
-                        f'<div style="font-size:11px; color:#888; margin-top:-8px; margin-bottom:8px;">'
-                        f'{sel_item["sku_prefix"]} · {sel_item["supplier"]} · '
-                        f'Action: <b>{sel_item["date_str"]}</b> · {po_line}'
-                        f'</div>',
-                        unsafe_allow_html=True,
+                list_html = '<div style="max-height:480px; overflow-y:auto; border:1px solid #eee; border-radius:6px;">'
+                for item in display_items:
+                    is_sel = item["sku_prefix"] == selected_sku_val
+                    border = "border-left:3px solid #1a73e8; background:#f0f6ff;" if is_sel else "border-left:3px solid transparent;"
+                    img_html = ""
+                    if item.get("img_url") and isinstance(item["img_url"], str) and item["img_url"].startswith("http"):
+                        img_html = f'<div style="flex-shrink:0;"><img src="{item["img_url"]}" style="width:32px; height:40px; object-fit:cover; border-radius:3px;"></div>'
+                    po_line = f'PO: <b>{item["po_str"]}</b>' if item["po_str"] else 'PO: <span style="color:#aaa;">no PO yet</span>'
+                    list_html += (
+                        f'<div style="padding:10px 12px; {border} border-bottom:1px solid #eee;">'
+                        f'<div style="display:flex; gap:8px;">'
+                        f'{img_html}'
+                        f'<div style="flex:1; min-width:0;">'
+                        f'<div style="font-weight:600; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{item["name"]}</div>'
+                        f'<div style="font-size:11px; color:#888;">{item["sku_prefix"]} · {item["supplier"]}</div>'
+                        f'<div style="font-size:11px; color:#555; margin-top:4px;">Action: <b>{item["date_str"]}</b> · {po_line}</div>'
+                        f'</div></div></div>'
                     )
+                list_html += '</div>'
+                st.markdown(list_html, unsafe_allow_html=True)
 
         with right_col:
             selected_sku = st.session_state.get("track_selected")
