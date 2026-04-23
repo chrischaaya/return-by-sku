@@ -160,6 +160,8 @@ if st.session_state.get("show_settings"):
         if st.button("Save & recalculate", type="primary", use_container_width=True):
             save_settings(s)
             config.reload_settings()
+            # Clear ALL caches (tracking, summaries, reviews, etc.)
+            st.cache_data.clear()
             with st.spinner("Recalculating with new settings..."):
                 st.session_state["data"] = load_data()
                 save_cache(st.session_state["data"])
@@ -170,6 +172,7 @@ if st.session_state.get("show_settings"):
 
 # --- Load data ---
 if should_update:
+    st.cache_data.clear()
     with st.spinner("Refreshing data... (~30s)"):
         st.session_state["data"] = load_data()
         save_cache(st.session_state["data"])
