@@ -695,7 +695,7 @@ def _render_expanded_graph(r):
     _last14 = r.get("_last14_str", "—")
     _lifetime = r.get("_lifetime_str", "—")
 
-    tfc = st.columns([0.6, 0.6, 0.5, 1.5, 1.5, 1])
+    tfc = st.columns([0.55, 0.55, 0.7, 2.2, 0.7, 0.5])
     with tfc[0]:
         start_d = st.date_input("From", value=default_start, min_value=min_date, max_value=max_date, key=f"tr_s_{sku}")
     with tfc[1]:
@@ -704,7 +704,7 @@ def _render_expanded_graph(r):
         st.markdown('<div style="height:29px;"></div>', unsafe_allow_html=True)
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=True)
     with tfc[4]:
-        st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14 days</div><div style="font-size:20px; font-weight:700;">{_last14}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Last 14d</div><div style="font-size:20px; font-weight:700;">{_last14}</div></div>', unsafe_allow_html=True)
     with tfc[5]:
         st.markdown(f'<div style="text-align:right;"><div style="font-size:10px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Lifetime</div><div style="font-size:20px; font-weight:700;">{_lifetime}</div></div>', unsafe_allow_html=True)
 
@@ -985,19 +985,24 @@ with tab_track:
                 lifetime_str = f"{selected_item['lifetime']:.1%}"
                 pm_str = f" · PM: {selected_item['pm']}" if selected_item["pm"] else ""
 
-                # Header + CTAs on same row
-                hdr1, hdr2, hdr3 = st.columns([4, 1, 1])
-                with hdr1:
-                    st.markdown(f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>', unsafe_allow_html=True)
-                    st.markdown(f'<div style="font-size:12px; color:#888; margin-top:-8px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>', unsafe_allow_html=True)
-                with hdr2:
-                    if st.button("✓ Resolved", key="resolve_selected"):
+                # Header + CTAs
+                st.markdown(
+                    f'<div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:4px;">'
+                    f'<div>'
+                    f'<div style="font-size:20px; font-weight:700; color:#1a1a1a;">{selected_item["name"]}</div>'
+                    f'<div style="font-size:12px; color:#888; margin-top:2px;">{selected_item["sku_prefix"]} · {selected_item["supplier"]}{pm_str}</div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True,
+                )
+                bc1, bc2, bc3 = st.columns([5, 0.7, 0.8])
+                with bc2:
+                    if st.button("✓ Resolved", key="resolve_selected", use_container_width=True):
                         resolve_sku(selected_sku)
                         st.session_state.pop("track_selected", None)
                         st.toast(f"Resolved: {selected_item['name']}")
                         st.rerun()
-                with hdr3:
-                    if st.button("+ New Action", key="new_action_btn"):
+                with bc3:
+                    if st.button("+ New Action", key="new_action_btn", use_container_width=True):
                         st.session_state["new_action_modal"] = selected_sku
 
                 if st.session_state.get("new_action_modal") == selected_sku:
