@@ -57,7 +57,7 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     now = datetime.now(timezone.utc)
 
     graph_start = min(action_date - timedelta(days=30), now - timedelta(days=180))
-    graph_end = now - timedelta(days=7)  # exclude last 7 days (delivery lag)
+    graph_end = now - timedelta(days=config.SLOW_DELIVERY_LAG_DAYS)  # exclude recent data (delivery lag)
 
     # Use preloaded data if available, otherwise fetch individually
     if _preloaded and sku_prefix in _preloaded:
