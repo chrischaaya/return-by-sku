@@ -690,19 +690,16 @@ def _render_expanded_graph(r):
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
     default_start = max(min_date, date_type.today() - td_delta(days=60))
-    tfc = st.columns([3, 1.5, 4])
+    tfc = st.columns([1.5, 1.5, 1.5, 3])
     with tfc[0]:
-        date_range = st.date_input("Time range", value=(default_start, max_date), min_value=min_date, max_value=max_date, key=f"tr_{sku}", label_visibility="collapsed")
+        start_d = st.date_input("From", value=default_start, min_value=min_date, max_value=max_date, key=f"tr_s_{sku}")
     with tfc[1]:
+        end_d = st.date_input("To", value=max_date, min_value=min_date, max_value=max_date, key=f"tr_e_{sku}")
+    with tfc[2]:
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
 
     df = rolling_df.copy()
-    if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
-        df = df[(df["date"].dt.date >= date_range[0]) & (df["date"].dt.date <= date_range[1])]
-    elif isinstance(date_range, (list, tuple)) and len(date_range) == 1:
-        # Only start date selected — waiting for end date, use default range
-        st.caption("Select end date...")
-        df = df[df["date"].dt.date >= default_start]
+    df = df[(df["date"].dt.date >= start_d) & (df["date"].dt.date <= end_d)]
     if df.empty:
         st.caption("No data in selected range")
         return
