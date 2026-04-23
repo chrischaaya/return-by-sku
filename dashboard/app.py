@@ -743,14 +743,18 @@ def _render_expanded_graph(r):
             if col in df.columns:
                 all_vals.extend(df[col].dropna().tolist())
     if all_vals:
-        p95 = sorted(all_vals)[int(len(all_vals) * 0.95)] if len(all_vals) > 5 else max(all_vals)
-        y_max = max(min(p95 + 0.05, 1.0), 0.10)
+        y_max = max(all_vals) + 0.03
+        y_max = max(y_max, 0.10)
     else:
         y_max = 0.5
 
+    # X-axis: fit exactly to filtered data range
+    x_min = df["date"].min()
+    x_max = df["date"].max()
+
     fig.update_layout(
         yaxis=dict(tickformat=".0%", title="", gridcolor="#f0f0f0", range=[0, y_max]),
-        xaxis=dict(title="", gridcolor="#f0f0f0"),
+        xaxis=dict(title="", gridcolor="#f0f0f0", range=[x_min, x_max]),
         height=320, margin=dict(t=20, b=30, l=40, r=10),
         plot_bgcolor="white", legend=dict(orientation="h", y=-0.15), hovermode="x unified",
     )
