@@ -131,12 +131,12 @@ def _show_settings():
         s["fast_delivery_lag_days"] = st.number_input("Grace period — fast channels (days)", 1, 30, int(s["fast_delivery_lag_days"]), help="Exclude recent orders for Trendyol/Hepsiburada (fast delivery).")
     with c6:
         s["slow_delivery_lag_days"] = st.number_input("Grace period — other channels (days)", 1, 30, int(s["slow_delivery_lag_days"]), help="Exclude recent orders for slower channels.")
-    all_channels = [
+    all_channels = sorted([
         "trendyol", "trendyolRO", "fashiondays", "fashiondaysBG",
         "emag", "emagBG", "emagHU", "hepsiburada", "hiccup",
         "debenhams", "namshi", "tiktokShop", "amazonUS", "amazonUK",
         "allegro", "ananas", "shein", "noon", "walmart", "aboutYou", "vogaCloset",
-    ]
+    ], key=str.lower)
     st.caption("Excluded channels")
     exc_c1, exc_c2, exc_c3 = st.columns([4, 0.6, 0.6])
     with exc_c2:

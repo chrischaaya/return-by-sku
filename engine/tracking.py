@@ -187,6 +187,20 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
         if total_all > 0 and cumulative / total_all >= 0.95:
             break
 
+    # Sort sizes in standard order (smallest to largest)
+    _SIZE_ORDER = [
+        "XXS", "XS", "S", "S/M", "M", "M/L", "L", "XL", "XXL", "2XL", "3XL", "4XL", "5XL",
+        "24", "25", "26", "27", "28", "29", "30", "31", "32", "33", "34", "35", "36",
+        "37", "38", "39", "40", "42", "44", "46", "48", "50",
+        "ONE SIZE", "STD",
+    ]
+    def _size_key(s):
+        try:
+            return _SIZE_ORDER.index(str(s).upper())
+        except ValueError:
+            return 999
+    visible_sizes = sorted(visible_sizes, key=_size_key)
+
     # Last 14 days rate
     lag_days = config.SLOW_DELIVERY_LAG_DAYS
     e14 = (now - timedelta(days=lag_days)).strftime("%Y-%m-%d")
