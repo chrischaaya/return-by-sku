@@ -728,7 +728,8 @@ def _render_expanded_graph(r):
         fig.add_annotation(x=ad_str, y=1, yref="paper", text=f"ACTION ({ad_label})", showarrow=False, font=dict(color="#f59e0b", size=10), yshift=10)
 
     # Show ALL POs within the visible date range (including older ones)
-    all_sku_pos = pipelines.get_sku_pos(sku, df["date"].min().to_pydatetime().replace(tzinfo=timezone.utc) - td_delta(days=30))
+    from engine.pipelines import get_sku_pos as _get_sku_pos
+    all_sku_pos = _get_sku_pos(sku, df["date"].min().to_pydatetime().replace(tzinfo=timezone.utc) - td_delta(days=30))
     for po in (all_sku_pos or []):
         received = po.get("received_on")
         if received:
