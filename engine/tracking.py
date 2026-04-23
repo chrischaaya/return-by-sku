@@ -76,6 +76,16 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     if df_ord.empty:
         return _empty_result(pos)
 
+    # Remove anomalous return days (bulk data events)
+    # A day with >10x the median daily returns is an artifact
+    if not df_ret.empty:
+        daily_totals = df_ret.groupby("date")["returned"].sum()
+        median_daily = daily_totals.median()
+        if median_daily > 0:
+            bad_dates = daily_totals[daily_totals > median_daily * 10].index.tolist()
+            if bad_dates:
+                df_ret = df_ret[~df_ret["date"].isin(bad_dates)]
+
     # Get all sizes
     all_sizes = sorted(set(df_ord["size"].unique()) | set(df_ret["size"].unique()) if not df_ret.empty else set(df_ord["size"].unique()))
 

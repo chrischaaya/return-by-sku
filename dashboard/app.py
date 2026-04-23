@@ -672,7 +672,7 @@ def _render_tracking_table(rows):
     """Render the tracking table as HTML."""
     html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
     html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
-    for col, align in [("Product", "left"), ("Action", "left"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("New Stock", "center")]:
+    for col, align in [("", "center"), ("Product", "left"), ("Action", "left"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("New Stock", "center")]:
         html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
     html += '</tr>'
 
@@ -696,7 +696,12 @@ def _render_tracking_table(rows):
         action_short = r["action_summary"][:50] + ("..." if len(r["action_summary"]) > 50 else "")
         pm_str = f" · {r['pm']}" if r["pm"] else ""
 
+        img_html = ""
+        if r["img_url"] and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
+            img_html = f'<img src="{r["img_url"]}" style="width:36px; height:45px; object-fit:cover; border-radius:4px;">'
+
         html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
+        html += f'<td style="padding:8px; text-align:center; width:44px;">{img_html}</td>'
         html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
         html += f'<td style="padding:10px 8px;"><div style="font-size:12px;">{action_short}</div><div style="font-size:11px; color:#aaa;">{r["days_ago"]}d ago</div></td>'
         html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{before}</td>'
@@ -727,7 +732,7 @@ def _render_expanded_graph(r):
     with tfc[2]:
         if st.button("All", key=f"{tf_key}_all"): st.session_state[tf_key] = 0
 
-    days_filter = st.session_state.get(tf_key, 90)
+    days_filter = st.session_state.get(tf_key, 30)
     df = rolling_df.copy()
     if days_filter > 0:
         cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
