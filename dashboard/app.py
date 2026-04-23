@@ -670,53 +670,7 @@ def _build_tracking_row(sku_prefix, action_doc, preloaded=None):
 
 def _render_tracking_table(rows):
     """Render the tracking table as HTML."""
-    html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
-    html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
-    for col, align in [("", "center"), ("Product", "left"), ("Action date", "center"), ("PO Inbound", "center"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("", "center")]:
-        html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
-    html += '</tr>'
-
-    for r in rows:
-        is_bad = r.get("change_pp") is not None and r["change_pp"] > 0
-        bg = "background:#fef2f2;" if is_bad else ""
-
-        before = f"{r['pre_po']:.1%}" if r.get("pre_po") is not None else "—"
-        after = f"{r['last_14d']:.1%}" if r.get("last_14d") is not None else "—"
-
-        if r.get("change_pp") is not None:
-            if r["change_pp"] <= -0.5:
-                change = f'<span style="font-weight:700; color:#16a34a;">▼ {abs(r["change_pp"]):.1f}pp</span>'
-            elif r["change_pp"] >= 0.5:
-                change = f'<span style="font-weight:700; color:#dc2626;">▲ {r["change_pp"]:.1f}pp</span>'
-            else:
-                change = '<span style="color:#888;">~ no change</span>'
-        else:
-            change = '<span style="color:#aaa;">waiting for stock</span>'
-
-        pm_str = f" · {r['pm']}" if r.get("pm") else ""
-        action_text = r.get("action_summary", "").replace('"', '&quot;').replace("'", "&#39;").replace("<", "&lt;").replace(">", "&gt;")
-        created = r.get("created_on")
-        date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
-
-        img_html = ""
-        if r.get("img_url") and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
-            img_html = f'<img src="{r["img_url"]}" style="width:36px; height:45px; object-fit:cover; border-radius:4px;">'
-
-        po_info = r.get("po_info", "")
-
-        html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
-        html += f'<td style="padding:8px; text-align:center; width:44px;">{img_html}</td>'
-        html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px; white-space:nowrap;">{date_str} <span title="{action_text}" style="cursor:help; color:#aaa; font-size:14px;">&#x24D8;</span></td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px;">{po_info or "<span style=color:#aaa;>no PO yet</span>"}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{before}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{after}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px;">{change}</td>'
-        html += f'<td style="padding:10px 8px; text-align:center; width:30px;" data-sku="{r["sku_prefix"]}"></td>'
-        html += '</tr>'
-
-    html += '</table>'
-    return html
+    return rows
 
 
 def _render_expanded_graph(r):
@@ -1013,20 +967,40 @@ with tab_track:
 
         # ── Table ──
         st.caption(f"{len(tracking_rows)} products being tracked")
-        st.markdown(_render_tracking_table(tracking_rows), unsafe_allow_html=True)
 
-        # Dismiss action
-        dc1, dc2 = st.columns([4, 1])
-        with dc1:
-            dismiss_options = {f"{r['name']} ({r['sku_prefix']})": r['sku_prefix'] for r in tracking_rows}
-            dismiss_sel = st.selectbox("Dismiss a product", [""] + list(dismiss_options.keys()), key="track_dismiss", label_visibility="collapsed")
-        with dc2:
-            if st.button("Dismiss", disabled=not dismiss_sel):
-                if dismiss_sel and dismiss_sel in dismiss_options:
-                    sku = dismiss_options[dismiss_sel]
-                    dismiss_sku(sku)
-                    st.toast(f"Dismissed: {dismiss_sel}")
+        # Header
+        hc = st.columns([0.5, 3, 2, 1.2, 1.2, 0.8])
+        hc[0].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;"></div>', unsafe_allow_html=True)
+        hc[1].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Product</div>', unsafe_allow_html=True)
+        hc[2].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Action</div>', unsafe_allow_html=True)
+        hc[3].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">Action date</div>', unsafe_allow_html=True)
+        hc[4].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;">PO Inbound</div>', unsafe_allow_html=True)
+        hc[5].markdown('<div style="font-size:11px; color:#888; text-transform:uppercase; font-weight:600;"></div>', unsafe_allow_html=True)
+
+        for r in tracking_rows:
+            rc = st.columns([0.5, 3, 2, 1.2, 1.2, 0.8])
+            with rc[0]:
+                if r.get("img_url") and isinstance(r["img_url"], str) and r["img_url"].startswith("http"):
+                    st.image(r["img_url"], width=36)
+            with rc[1]:
+                st.markdown(f"**{r['name']}**")
+                pm_str = f" · {r['pm']}" if r.get("pm") else ""
+                st.caption(f"{r['sku_prefix']} · {r['supplier']}{pm_str}")
+            with rc[2]:
+                st.markdown(f'<div style="font-size:12px;">{r["action_summary"]}</div>', unsafe_allow_html=True)
+            with rc[3]:
+                created = r.get("created_on")
+                date_str = created.strftime("%d %b %Y") if created and hasattr(created, "strftime") else "—"
+                st.markdown(f'<div style="font-size:12px; text-align:center;">{date_str}</div>', unsafe_allow_html=True)
+            with rc[4]:
+                po_info = r.get("po_info", "")
+                st.markdown(f'<div style="font-size:12px; text-align:center;">{po_info or "<span style=color:#aaa;>no PO yet</span>"}</div>', unsafe_allow_html=True)
+            with rc[5]:
+                if st.button("Dismiss", key=f"dismiss_{r['sku_prefix']}"):
+                    dismiss_sku(r["sku_prefix"])
+                    st.toast(f"Dismissed: {r['name']}")
                     st.rerun()
+            st.markdown('<hr style="margin:0; border:none; border-top:1px solid #eee;">', unsafe_allow_html=True)
 
 # =====================================================================
 # TAB 3: PARKED
