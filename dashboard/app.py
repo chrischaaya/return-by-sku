@@ -142,11 +142,9 @@ def _show_settings():
     with exc_c2:
         if st.button("All", use_container_width=True, help="Exclude all channels"):
             st.session_state["_exc_ch"] = all_channels
-            st.rerun()
     with exc_c3:
         if st.button("Clear", use_container_width=True, help="Include all channels"):
             st.session_state["_exc_ch"] = []
-            st.rerun()
     with exc_c1:
         if "_exc_ch" not in st.session_state:
             st.session_state["_exc_ch"] = s["excluded_channels"]
