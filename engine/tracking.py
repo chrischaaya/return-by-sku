@@ -144,7 +144,8 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
     df_ord["date"] = pd.to_datetime(df_ord["date"])
     df_ret["date"] = pd.to_datetime(df_ret["date"]) if not df_ret.empty else df_ret["date"]
 
-    date_idx = pd.date_range(graph_start.date(), now.date(), freq="D")
+    graph_end = now - timedelta(days=7)
+    date_idx = pd.date_range(graph_start.date(), graph_end.date(), freq="D")
 
     # Daily totals
     ord_daily = df_ord.groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
