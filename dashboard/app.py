@@ -625,162 +625,137 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
 
 
 
-BADGE_STYLES = {
-    "IMPROVING": ("background:#dcfce7; color:#166534;", "IMPROVING"),
-    "NO CHANGE": ("background:#f1f5f9; color:#475569;", "NO CHANGE"),
-    "WORSENING": ("background:#fef2f2; color:#991b1b;", "WORSENING"),
-    "WAITING": ("background:#fef3c7; color:#92400e;", "WAITING"),
-}
-
 SIZE_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#84cc16"]
 
 
-def _build_tracking_info(sku_prefix, action_doc, preloaded=None):
-    """Build display data for a tracking card without rendering."""
+def _build_tracking_row(sku_prefix, action_doc, preloaded=None):
+    """Build one row of tracking data."""
     row = df_sku[df_sku["sku_prefix"] == sku_prefix]
     name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
     img_url = row.iloc[0].get("image_url") if not row.empty else None
-    has_img = img_url and isinstance(img_url, str) and img_url.startswith("http")
     supplier = row.iloc[0].get("supplier_name", "N/A") if not row.empty else "N/A"
-    pm = row.iloc[0].get("product_manager", "N/A") if not row.empty else "N/A"
+    pm = row.iloc[0].get("product_manager", "") if not row.empty else ""
 
     action_summary = action_doc.get("actionSummary", "N/A")
     created_on = action_doc.get("createdOn")
     days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
-    date_str = created_on.strftime("%d %b %Y") if created_on else "?"
 
     action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
     td = get_tracking_data(sku_prefix, action_iso, _preloaded=preloaded)
 
-    badge_key = td["badge"]
-    badge_style, badge_label = BADGE_STYLES.get(badge_key, BADGE_STYLES["WAITING"])
-
-    last_14d = f"{td['last_14d_rate']:.1%}" if td["last_14d_rate"] is not None else "—"
-    pre_po = f"{td['pre_po_rate']:.1%}" if td["pre_po_rate"] is not None else "—"
-    lifetime = f"{td['lifetime_rate']:.1%}"
-
-    if td["pos"]:
-        first_po = td["pos"][0]
-        po_date = first_po["received_on"]
-        po_date_str = po_date.strftime("%d %b") if hasattr(po_date, "strftime") else str(po_date)[:10]
-        po_units = sum(item.get("received", 0) for item in first_po.get("items", []))
-        po_text = f"Received {po_date_str}"
-        po_detail = f"{po_units} units"
+    pre_po = td["pre_po_rate"]
+    last_14d = td["last_14d_rate"]
+    if pre_po is not None and last_14d is not None:
+        change_pp = (last_14d - pre_po) * 100
     else:
-        po_text = "No PO yet"
-        po_detail = "—"
+        change_pp = None
+
+    po_info = ""
+    if td["pos"]:
+        p = td["pos"][0]
+        d = p["received_on"]
+        ds = d.strftime("%d %b") if hasattr(d, "strftime") else str(d)[:10]
+        u = sum(i.get("received", 0) for i in p.get("items", []))
+        po_info = f"{ds} ({u}u)"
 
     return {
-        "sku_prefix": sku_prefix, "name": name, "img_url": img_url, "has_img": has_img,
+        "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
         "supplier": supplier, "pm": pm, "action_summary": action_summary,
-        "created_on": created_on, "days_ago": days_ago, "date_str": date_str,
-        "td": td, "badge_style": badge_style, "badge_label": badge_label,
-        "last_14d": last_14d, "pre_po": pre_po, "lifetime": lifetime,
-        "po_text": po_text, "po_detail": po_detail,
+        "created_on": created_on, "days_ago": days_ago,
+        "td": td, "pre_po": pre_po, "last_14d": last_14d,
+        "lifetime": td["lifetime_rate"], "change_pp": change_pp,
+        "po_info": po_info, "badge": td["badge"],
     }
 
 
-def render_tracking_card_compact(info):
-    """Render a compact tracking card (no graph)."""
-    sku_prefix = info["sku_prefix"]
-    is_selected = st.session_state.get("track_selected") == sku_prefix
+def _render_tracking_table(rows):
+    """Render the tracking table as HTML."""
+    html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
+    html += '<tr style="background:#f8f8f8; border-bottom:2px solid #ddd; font-size:11px; text-transform:uppercase; letter-spacing:0.5px; color:#888;">'
+    for col, align in [("Product", "left"), ("Action", "left"), ("Before", "center"), ("After", "center"), ("Change", "center"), ("New Stock", "center")]:
+        html += f'<th style="padding:10px 8px; text-align:{align}; font-weight:600;">{col}</th>'
+    html += '</tr>'
 
-    border_style = "border-left:4px solid #1a73e8;" if is_selected else ""
-    with st.container(border=True):
-        st.markdown(f'<div style="{border_style}"></div>', unsafe_allow_html=True) if is_selected else None
-        top1, top2, top3 = st.columns([1, 7, 1])
-        with top1:
-            if info["has_img"]:
-                st.image(info["img_url"], width=50)
-        with top2:
-            st.markdown(f"**{info['name']}**")
-            st.caption(f"{sku_prefix} · {info['supplier']} · PM: {info['pm'] or 'N/A'} · Action: {info['date_str']} ({info['days_ago']}d ago)")
-        with top3:
-            st.markdown(f'<div style="text-align:right;"><span style="{info["badge_style"]} font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px;">{info["badge_label"]}</span></div>', unsafe_allow_html=True)
+    for r in rows:
+        is_bad = r["change_pp"] is not None and r["change_pp"] > 0
+        bg = "background:#fef2f2;" if is_bad else ""
 
-        mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1])
-        with mc1:
-            st.markdown(f'<div style="font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{info["action_summary"]}">{info["action_summary"][:60]}{"..." if len(info["action_summary"]) > 60 else ""}</div>', unsafe_allow_html=True)
-        with mc2:
-            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">14d:</span> <b>{info["last_14d"]}</b></div>', unsafe_allow_html=True)
-        with mc3:
-            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">Pre-PO:</span> <b>{info["pre_po"]}</b></div>', unsafe_allow_html=True)
-        with mc4:
-            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">Lifetime:</span> <b>{info["lifetime"]}</b></div>', unsafe_allow_html=True)
-        with mc5:
-            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">PO:</span> <b>{info["po_text"]}</b></div>', unsafe_allow_html=True)
-        with mc6:
-            bc1, bc2 = st.columns(2)
-            with bc1:
-                if st.button("📊", key=f"sel_{sku_prefix}", help="Show in graph"):
-                    st.session_state["track_selected"] = sku_prefix
-                    st.rerun()
-            with bc2:
-                if st.button("✕", key=f"dismiss_{sku_prefix}", help="Dismiss"):
-                    dismiss_sku(sku_prefix)
-                    if st.session_state.get("track_selected") == sku_prefix:
-                        st.session_state.pop("track_selected", None)
-                    st.toast(f"Dismissed: {info['name']}")
-                    st.rerun()
+        before = f"{r['pre_po']:.1%}" if r["pre_po"] is not None else "—"
+        after = f"{r['last_14d']:.1%}" if r["last_14d"] is not None else "—"
+
+        if r["change_pp"] is not None:
+            if r["change_pp"] <= -0.5:
+                change = f'<span style="font-weight:700; color:#16a34a;">▼ {abs(r["change_pp"]):.1f}pp</span>'
+            elif r["change_pp"] >= 0.5:
+                change = f'<span style="font-weight:700; color:#dc2626;">▲ {r["change_pp"]:.1f}pp</span>'
+            else:
+                change = '<span style="color:#888;">~ no change</span>'
+        else:
+            change = '<span style="color:#aaa;">waiting for stock</span>'
+
+        action_short = r["action_summary"][:50] + ("..." if len(r["action_summary"]) > 50 else "")
+        pm_str = f" · {r['pm']}" if r["pm"] else ""
+
+        html += f'<tr style="{bg} border-bottom:1px solid #eee;">'
+        html += f'<td style="padding:10px 8px;"><div style="font-weight:600;">{r["name"]}</div><div style="font-size:11px; color:#888;">{r["sku_prefix"]} · {r["supplier"]}{pm_str}</div></td>'
+        html += f'<td style="padding:10px 8px;"><div style="font-size:12px;">{action_short}</div><div style="font-size:11px; color:#aaa;">{r["days_ago"]}d ago</div></td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{before}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px; font-weight:600;">{after}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:15px;">{change}</td>'
+        html += f'<td style="padding:10px 8px; text-align:center; font-size:12px;">{r["po_info"] or "<span style=&quot;color:#aaa;&quot;>no PO yet</span>"}</td>'
+        html += '</tr>'
+
+    html += '</table>'
+    return html
 
 
-def render_tracking_graph(info):
-    """Render the Plotly time-series graph for the selected tracked SKU."""
-    td = info["td"]
-    action_date = info["created_on"]
-    action_summary = info["action_summary"]
+def _render_expanded_graph(r):
+    """Render the Plotly graph for an expanded tracking row."""
+    td = r["td"]
     rolling_df = td["rolling_df"]
-
     if rolling_df.empty:
-        st.info(f"Not enough data for **{info['name']}** yet.")
+        st.caption("Not enough data for graph yet.")
         return
 
-    # Time filter
-    tf_key = "track_tf"
-    tfc = st.columns([1, 1, 1, 1, 6])
+    sku = r["sku_prefix"]
+    tf_key = f"tf_{sku}"
+    tfc = st.columns([1, 1, 1, 8])
     with tfc[0]:
-        if st.button("30d", key="tf_30"): st.session_state[tf_key] = 30
+        if st.button("30d", key=f"{tf_key}_30"): st.session_state[tf_key] = 30
     with tfc[1]:
-        if st.button("60d", key="tf_60"): st.session_state[tf_key] = 60
+        if st.button("90d", key=f"{tf_key}_90"): st.session_state[tf_key] = 90
     with tfc[2]:
-        if st.button("90d", key="tf_90"): st.session_state[tf_key] = 90
-    with tfc[3]:
-        if st.button("All", key="tf_all"): st.session_state[tf_key] = 0
+        if st.button("All", key=f"{tf_key}_all"): st.session_state[tf_key] = 0
 
     days_filter = st.session_state.get(tf_key, 90)
     df = rolling_df.copy()
     if days_filter > 0:
         cutoff = pd.Timestamp.now() - pd.Timedelta(days=days_filter)
         df = df[df["date"] >= cutoff]
-
     if df.empty:
         st.caption("No data in selected range")
         return
 
-    fig = go.Figure()
+    show_sizes = st.checkbox("Show per-size lines", key=f"sizes_{sku}", value=False)
 
+    fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["date"], y=df["overall_rate"],
-        mode="lines", name="Overall",
-        line=dict(color="#333", width=3),
-        hovertemplate="%{x|%d %b %Y}<br>Overall: %{y:.1%}<extra></extra>",
-        connectgaps=False,
+        x=df["date"], y=df["overall_rate"], mode="lines", name="Overall",
+        line=dict(color="#333", width=3), hovertemplate="%{x|%d %b %Y}<br>Overall: %{y:.1%}<extra></extra>", connectgaps=False,
     ))
 
-    for i, size in enumerate(td["sizes"]):
-        col_name = f"rate_{size}"
-        if col_name not in df.columns:
-            continue
-        color = SIZE_COLORS[i % len(SIZE_COLORS)]
-        fig.add_trace(go.Scatter(
-            x=df["date"], y=df[col_name],
-            mode="lines", name=size,
-            line=dict(color=color, width=1.5),
-            opacity=0.6,
-            hovertemplate=f"{size}: %{{y:.1%}}<extra></extra>",
-            connectgaps=False,
-        ))
+    if show_sizes:
+        for i, size in enumerate(td["sizes"]):
+            col = f"rate_{size}"
+            if col not in df.columns:
+                continue
+            fig.add_trace(go.Scatter(
+                x=df["date"], y=df[col], mode="lines", name=size,
+                line=dict(color=SIZE_COLORS[i % len(SIZE_COLORS)], width=1.5), opacity=0.6,
+                hovertemplate=f"{size}: %{{y:.1%}}<extra></extra>", connectgaps=False,
+            ))
 
+    action_date = r["created_on"]
     if action_date:
         ad_str = action_date.strftime("%Y-%m-%d") if hasattr(action_date, "strftime") else str(action_date)[:10]
         fig.add_shape(type="line", x0=ad_str, x1=ad_str, y0=0, y1=1, yref="paper", line=dict(color="#f59e0b", width=2, dash="dash"))
@@ -789,16 +764,17 @@ def render_tracking_graph(info):
     for po in td["pos"]:
         received = po.get("received_on")
         if received:
-            r_str = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
-            units = sum(item.get("received", 0) for item in po.get("items", []))
-            fig.add_shape(type="line", x0=r_str, x1=r_str, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
-            fig.add_annotation(x=r_str, y=1, yref="paper", text=f"PO ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
+            rs = received.strftime("%Y-%m-%d") if hasattr(received, "strftime") else str(received)[:10]
+            units = sum(it.get("received", 0) for it in po.get("items", []))
+            fig.add_shape(type="line", x0=rs, x1=rs, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
+            fig.add_annotation(x=rs, y=1, yref="paper", text=f"NEW STOCK ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
 
     all_vals = df["overall_rate"].dropna().tolist()
-    for size in td["sizes"]:
-        col = f"rate_{size}"
-        if col in df.columns:
-            all_vals.extend(df[col].dropna().tolist())
+    if show_sizes:
+        for size in td["sizes"]:
+            col = f"rate_{size}"
+            if col in df.columns:
+                all_vals.extend(df[col].dropna().tolist())
     if all_vals:
         p95 = sorted(all_vals)[int(len(all_vals) * 0.95)] if len(all_vals) > 5 else max(all_vals)
         y_max = max(min(p95 + 0.05, 1.0), 0.10)
@@ -806,38 +782,23 @@ def render_tracking_graph(info):
         y_max = 0.5
 
     fig.update_layout(
-        title=dict(text=f"{info['name']} ({info['sku_prefix']})", font=dict(size=14)),
-        yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
+        yaxis=dict(tickformat=".0%", title="", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0"),
-        height=380,
-        margin=dict(t=40, b=40, l=50, r=20),
-        plot_bgcolor="white",
-        legend=dict(orientation="h", y=-0.15),
-        hovermode="x unified",
+        height=300, margin=dict(t=20, b=30, l=40, r=10),
+        plot_bgcolor="white", legend=dict(orientation="h", y=-0.2), hovermode="x unified",
     )
-
     st.plotly_chart(fig, use_container_width=True)
 
-    # Timeline summary
-    lines = []
+    # Compact summary
+    parts = []
     if action_date:
-        lines.append(f"<span style='color:#f59e0b;'>&#9679;</span> Action taken {action_date.strftime('%d %b %Y')} — {action_summary}")
+        parts.append(f'<span style="color:#f59e0b;">●</span> Action: {action_date.strftime("%d %b %Y")}')
     for po in td["pos"]:
-        r_on = po.get("received_on")
-        c_on = po.get("created_on")
-        items = po.get("items", [])
-        size_detail = ", ".join(f"{it['size']}={it.get('received', 0)}" for it in items if it.get("received", 0) > 0)
-        total = sum(it.get("received", 0) for it in items)
-        r_str = r_on.strftime("%d %b") if hasattr(r_on, "strftime") else str(r_on)[:10]
-        c_str = c_on.strftime("%d %b") if hasattr(c_on, "strftime") else str(c_on)[:10]
-        lines.append(f"<span style='color:#16a34a;'>&#9679;</span> PO created {c_str} &rarr; Received {r_str} ({total} units: {size_detail})")
-    if td["pre_po_rate"] is not None and td["last_14d_rate"] is not None:
-        lines.append(f"<span style='color:#333;'>&#9679;</span> 14-day return rate: <b>{td['pre_po_rate']:.1%}</b> pre-PO &rarr; <b>{td['last_14d_rate']:.1%}</b> now")
-    if lines:
-        st.markdown(
-            f'<div style="font-size:12px; color:#555; padding:10px 14px; background:#f8fafc; border-radius:6px; line-height:1.7;">{"<br>".join(lines)}</div>',
-            unsafe_allow_html=True,
-        )
+        ro = po.get("received_on")
+        u = sum(it.get("received", 0) for it in po.get("items", []))
+        parts.append(f'<span style="color:#16a34a;">●</span> Stock: {ro.strftime("%d %b") if hasattr(ro, "strftime") else str(ro)[:10]} ({u}u)')
+    parts.append(f'Lifetime: {r["lifetime"]:.1%}')
+    st.markdown(f'<div style="font-size:11px; color:#888;">{" · ".join(parts)}</div>', unsafe_allow_html=True)
 
 
 # =====================================================================
@@ -961,41 +922,40 @@ with tab_track:
     if not tracking_data:
         st.info("No actions taken yet. Mark products as 'Action taken' from the Needs Attention tab.")
     else:
-        # Sort by action date (most recent first)
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Batch preload all tracking data
+        # Batch preload
         import json
         pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
         preloaded = preload_tracking_batch(json.dumps(pairs))
 
-        # Build info for all cards
-        all_infos = {}
-        for sku_prefix, action_doc in sorted_tracking:
-            all_infos[sku_prefix] = _build_tracking_info(sku_prefix, action_doc, preloaded)
+        # Build all rows
+        tracking_rows = [_build_tracking_row(s, d, preloaded) for s, d in sorted_tracking]
 
-        # Auto-select first if nothing selected
-        if st.session_state.get("track_selected") not in all_infos and all_infos:
-            st.session_state["track_selected"] = list(all_infos.keys())[0]
-
-        # ── Graph at top ──
-        selected = st.session_state.get("track_selected")
-        if selected and selected in all_infos:
-            render_tracking_graph(all_infos[selected])
-
-        st.markdown("---")
-
-        # ── Search + compact cards below ──
+        # Search
         track_search = st.text_input("Search", placeholder="Search tracked products...", key="track_search", label_visibility="collapsed")
-
-        display_infos = list(all_infos.values())
         if track_search:
             q = track_search.lower()
-            display_infos = [i for i in display_infos if q in i["sku_prefix"].lower() or q in str(i["name"]).lower()]
+            tracking_rows = [r for r in tracking_rows if q in r["sku_prefix"].lower() or q in str(r["name"]).lower()]
 
-        st.caption(f"{len(display_infos)} products being tracked")
-        for info in display_infos:
-            render_tracking_card_compact(info)
+        st.caption(f"{len(tracking_rows)} products being tracked")
+
+        # Render table
+        st.markdown(_render_tracking_table(tracking_rows), unsafe_allow_html=True)
+
+        # Expandable graph per row — click product to expand
+        st.markdown('<div style="height:8px;"></div>', unsafe_allow_html=True)
+        for r in tracking_rows:
+            sku = r["sku_prefix"]
+            with st.expander(f"{r['name']} ({sku})", expanded=False):
+                dc1, dc2 = st.columns([6, 1])
+                with dc1:
+                    _render_expanded_graph(r)
+                with dc2:
+                    if st.button("Dismiss", key=f"dismiss_{sku}"):
+                        dismiss_sku(sku)
+                        st.toast(f"Dismissed: {r['name']}")
+                        st.rerun()
 
 # =====================================================================
 # TAB 3: PARKED
