@@ -690,12 +690,13 @@ def _render_expanded_graph(r):
     min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
     default_start = max(min_date, date_type.today() - td_delta(days=60))
-    tfc = st.columns([1.5, 1.5, 1.5, 3])
+    tfc = st.columns([1, 1, 0.8, 3])
     with tfc[0]:
         start_d = st.date_input("From", value=default_start, min_value=min_date, max_value=max_date, key=f"tr_s_{sku}")
     with tfc[1]:
         end_d = st.date_input("To", value=max_date, min_value=min_date, max_value=max_date, key=f"tr_e_{sku}")
     with tfc[2]:
+        st.markdown('<div style="height:28px;"></div>', unsafe_allow_html=True)
         show_sizes = st.checkbox("Per-size", key=f"sizes_{sku}", value=False)
 
     df = rolling_df.copy()
