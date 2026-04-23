@@ -974,14 +974,7 @@ with tab_track:
                 action_doc = tracking_data[selected_sku]
                 created_on = action_doc.get("createdOn")
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-                # Compute days_back from date inputs (default 90 for 60d view + buffer)
-                _from_key = f"tr_s_{selected_sku}"
-                if _from_key in st.session_state:
-                    from datetime import date as _dt
-                    _days = (_dt.today() - st.session_state[_from_key]).days + 14
-                else:
-                    _days = 90
-                td = get_tracking_data(selected_sku, action_iso, days_back=_days)
+                td = get_tracking_data(selected_sku, action_iso, days_back=375)
 
                 last_14d = td["last_14d_rate"]
                 last_14d_str = f"{last_14d:.1%}" if last_14d is not None and last_14d > 0 else ("No data" if last_14d is None or last_14d == 0 else f"{last_14d:.1%}")
