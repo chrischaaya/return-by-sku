@@ -684,13 +684,13 @@ def _render_expanded_graph(r):
         return
 
     sku = r["sku_prefix"]
-    from datetime import date as date_type
+    from datetime import date as date_type, timedelta as td_delta
 
     # Time range filter + per-size toggle
     tfc = st.columns([2, 2, 2])
-    min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - timedelta(days=90)
+    min_date = rolling_df["date"].min().date() if not rolling_df.empty else date_type.today() - td_delta(days=90)
     max_date = rolling_df["date"].max().date() if not rolling_df.empty else date_type.today()
-    default_start = max(min_date, date_type.today() - timedelta(days=60))
+    default_start = max(min_date, date_type.today() - td_delta(days=60))
     with tfc[0]:
         date_range = st.date_input("Time range", value=(default_start, max_date), min_value=min_date, max_value=max_date, key=f"tr_{sku}", label_visibility="collapsed")
     with tfc[2]:
