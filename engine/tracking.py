@@ -14,6 +14,80 @@ from engine import pipelines
 
 
 @st.cache_data(ttl=3600)
+def get_tracking_summaries(cache_key: str, sku_action_pairs_json: str) -> dict:
+    """
+    Fast summary for the table: Before/After/Change/PO per SKU.
+    Uses simple count queries (~0.5s total) instead of daily aggregations (~7s).
+    Returns {sku_prefix: {last_14d, pre_po, change_pp, po_info, badge}}.
+    """
+    import json
+    pairs = json.loads(sku_action_pairs_json)
+    if not pairs:
+        return {}
+
+    now = datetime.now(timezone.utc)
+    lag = config.SLOW_DELIVERY_LAG_DAYS
+
+    sku_prefixes = [p[0] for p in pairs]
+    sku_action_dates = {p[0]: datetime.fromisoformat(p[1]).replace(tzinfo=timezone.utc) for p in pairs}
+
+    # "After" = last 14 days (same window for all SKUs) — 2 fast queries
+    after_end = now - timedelta(days=lag)
+    after_start = after_end - timedelta(days=14)
+    after_sold = pipelines.get_orders_count_for_skus(sku_prefixes, after_start, after_end)
+    after_returned = pipelines.get_returns_count_for_skus(sku_prefixes, after_start, after_end)
+
+    # POs for all SKUs — 1 batch query
+    po_pairs = [(sku, sku_action_dates[sku]) for sku in sku_prefixes]
+    all_pos = pipelines.get_pos_for_skus(po_pairs)
+
+    # "Before" = 30 days before first PO received per SKU — 2 queries per SKU
+    results = {}
+    for sku in sku_prefixes:
+        a_sold = after_sold.get(sku, 0)
+        a_ret = after_returned.get(sku, 0)
+        last_14d = min(a_ret / a_sold, 1.0) if a_sold > 0 else None
+
+        pos = all_pos.get(sku, [])
+        pre_po = None
+        po_info = ""
+
+        if pos:
+            first_po = pos[0]
+            received = first_po["received_on"]
+            r_str = received.strftime("%d %b") if hasattr(received, "strftime") else str(received)[:10]
+            units = sum(i.get("received", 0) for i in first_po.get("items", []))
+            po_info = f"{r_str} ({units}u)"
+
+            # Before window: 30 days ending at (received - lag)
+            before_end = received - timedelta(days=lag)
+            before_start = before_end - timedelta(days=30)
+            b_sold = pipelines.get_orders_count_for_skus([sku], before_start, before_end).get(sku, 0)
+            b_ret = pipelines.get_returns_count_for_skus([sku], before_start, received).get(sku, 0)
+            pre_po = min(b_ret / b_sold, 1.0) if b_sold > 0 else None
+
+        change_pp = None
+        if pre_po is not None and last_14d is not None:
+            change_pp = (last_14d - pre_po) * 100
+
+        badge = "WAITING"
+        if change_pp is not None:
+            if change_pp <= -3:
+                badge = "IMPROVING"
+            elif change_pp >= 3:
+                badge = "WORSENING"
+            else:
+                badge = "NO CHANGE"
+
+        results[sku] = {
+            "last_14d": last_14d, "pre_po": pre_po, "change_pp": change_pp,
+            "po_info": po_info, "pos": pos, "badge": badge,
+        }
+
+    return results
+
+
+@st.cache_data(ttl=3600)
 def preload_tracking_batch(cache_key: str, sku_action_pairs_json: str) -> dict:
     """
     Batch-fetch daily orders and returns for all tracked SKUs in 2 queries.

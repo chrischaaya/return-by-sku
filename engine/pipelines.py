@@ -476,6 +476,72 @@ def get_trendyol_review_stats() -> list:
         client.close()
 
 
+def get_orders_count_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> dict:
+    """Fast: total sold per SKU in a date range. Returns {sku_prefix: sold}."""
+    db = get_db()
+    if not sku_prefixes:
+        return {}
+    pipeline = [
+        {"$match": {"createdOn": {"$gte": start_date, "$lte": end_date}, "salesChannel": {"$nin": config.EXCLUDED_CHANNELS}, "status": {"$in": config.VALID_ORDER_STATUSES}}},
+        {"$unwind": "$lineItems"},
+        {"$match": {"lineItems.skuPrefix": {"$in": sku_prefixes}}},
+        {"$group": {"_id": "$lineItems.skuPrefix", "sold": {"$sum": "$lineItems.quantity"}}},
+    ]
+    return {r["_id"]: r["sold"] for r in db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True)}
+
+
+def get_returns_count_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> dict:
+    """Fast: total returned per SKU in a date range. Returns {sku_prefix: returned}."""
+    db = get_db()
+    if not sku_prefixes:
+        return {}
+    pipeline = [
+        {"$match": {"createdOn": {"$gte": start_date, "$lte": end_date}, "salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
+        {"$unwind": "$items"},
+        {"$match": {"items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES}, "items.skuPrefix": {"$in": sku_prefixes}}},
+        {"$group": {"_id": "$items.skuPrefix", "returned": {"$sum": "$items.quantity"}}},
+    ]
+    return {r["_id"]: r["returned"] for r in db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True)}
+
+
+def get_pos_for_skus(sku_action_pairs: list) -> dict:
+    """
+    Batch: get POs for multiple SKUs in one query to hiccup-ff.
+    sku_action_pairs: [(sku_prefix, action_date), ...]
+    Returns {sku_prefix: [{created_on, received_on, items}, ...]}.
+    """
+    from pymongo import MongoClient
+    import streamlit as st
+
+    if not sku_action_pairs:
+        return {}
+
+    uri = st.secrets.get("MONGO_FF_URI", st.secrets.get("MONGO_URI"))
+    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
+    try:
+        db = client["hiccup-ff"]
+        sku_prefixes = [p[0] for p in sku_action_pairs]
+        earliest = min(p[1] for p in sku_action_pairs)
+        pipeline = [
+            {"$match": {"skuPrefix": {"$in": sku_prefixes}, "createdOn": {"$gt": earliest}, "warehouseTransactionDate": {"$exists": True, "$ne": None}, "status": {"$nin": ["ORDER_CANCELLED"]}}},
+            {"$sort": {"warehouseTransactionDate": 1}},
+            {"$project": {"_id": 0, "skuPrefix": 1, "created_on": "$createdOn", "received_on": "$warehouseTransactionDate",
+                "items": {"$map": {"input": "$items", "as": "item", "in": {"size": "$$item.size", "ordered": "$$item.ordered", "received": "$$item.received"}}}}},
+        ]
+        results = {}
+        for doc in db["SupplierProductOrders"].aggregate(pipeline):
+            sku = doc.pop("skuPrefix")
+            # Only keep POs created after this SKU's action date
+            action_date = next((p[1] for p in sku_action_pairs if p[0] == sku), earliest)
+            if doc["created_on"] > action_date:
+                results.setdefault(sku, []).append(doc)
+        return results
+    except Exception:
+        return {}
+    finally:
+        client.close()
+
+
 def get_daily_orders_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
     """
     Daily order counts per (skuPrefix, size) for multiple SKUs in one query.

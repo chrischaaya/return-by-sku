@@ -31,7 +31,7 @@ from engine.cache import save_cache, load_cache, get_cache_age
 from engine.settings import load_settings, save_settings, DEFAULTS
 from anthropic import Anthropic
 from engine.pipelines import get_sku_review_comments
-from engine.tracking import get_tracking_data, preload_tracking_batch
+from engine.tracking import get_tracking_data, get_tracking_summaries
 import plotly.graph_objects as go
 
 SIZE_ORDER = [
@@ -933,14 +933,33 @@ with tab_track:
     else:
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
 
-        # Batch preload (cache key = hour + SKU list)
+        # Fast summaries for table: simple count queries (~1s), not daily aggregations (~7s)
         import json
         pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
         cache_key = f"{datetime.now(timezone.utc).strftime('%Y-%m-%d-%H')}_{','.join(sorted(s for s, _ in sorted_tracking))}"
-        preloaded = preload_tracking_batch(cache_key, json.dumps(pairs))
+        summaries = get_tracking_summaries(cache_key, json.dumps(pairs))
 
-        # Build all rows with Before/After/Change
-        tracking_rows = [_build_tracking_row(s, d, preloaded) for s, d in sorted_tracking]
+        # Build table rows (fast — uses summaries + df_sku already in memory)
+        tracking_rows = []
+        for sku_prefix, action_doc in sorted_tracking:
+            row = df_sku[df_sku["sku_prefix"] == sku_prefix]
+            name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
+            img_url = row.iloc[0].get("image_url") if not row.empty else None
+            supplier = row.iloc[0].get("supplier_name", "N/A") if not row.empty else "N/A"
+            pm = row.iloc[0].get("product_manager", "") if not row.empty else ""
+            lifetime = float(row.iloc[0]["return_rate"]) if not row.empty else 0
+            created_on = action_doc.get("createdOn")
+            days_ago = (pd.Timestamp.now(tz="UTC") - pd.Timestamp(created_on, tz="UTC")).days if created_on else 0
+            s = summaries.get(sku_prefix, {})
+            tracking_rows.append({
+                "sku_prefix": sku_prefix, "name": name, "img_url": img_url,
+                "supplier": supplier, "pm": pm, "lifetime": lifetime,
+                "action_summary": action_doc.get("actionSummary", "N/A"),
+                "created_on": created_on, "days_ago": days_ago,
+                "pre_po": s.get("pre_po"), "last_14d": s.get("last_14d"),
+                "change_pp": s.get("change_pp"), "po_info": s.get("po_info", ""),
+                "badge": s.get("badge", "WAITING"),
+            })
 
         # ── Graph section: on-demand for one product ──
         graph_search = st.text_input("Analyze product", placeholder="Type product name or SKU to load its return rate trend...", key="track_graph_search", label_visibility="collapsed")
@@ -955,7 +974,12 @@ with tab_track:
 
         if graph_sku:
             graph_row = next(r for r in tracking_rows if r["sku_prefix"] == graph_sku)
-            td = graph_row["td"]
+            action_doc = tracking_data[graph_sku]
+            created_on = action_doc.get("createdOn")
+            action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
+            with st.spinner("Loading trend..."):
+                td = get_tracking_data(graph_sku, action_iso)
+            graph_row["td"] = td
 
             mc1, mc2, mc3, mc4 = st.columns(4)
             with mc1:
@@ -986,7 +1010,7 @@ with tab_track:
 
         st.markdown("---")
 
-        # ── Table with Before/After/Change ──
+        # ── Table ──
         st.caption(f"{len(tracking_rows)} products being tracked")
         st.markdown(_render_tracking_table(tracking_rows), unsafe_allow_html=True)
 
