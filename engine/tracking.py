@@ -121,7 +121,7 @@ def preload_tracking_batch(cache_key: str, sku_action_pairs_json: str) -> dict:
 
 
 @st.cache_data(ttl=3600)
-def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90, _preloaded: dict = None) -> dict:
+def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90, _excluded_channels: str = "", _preloaded: dict = None) -> dict:
     """
     Compute all tracking data for a single SKU.
     Vectorized rolling computation — no Python loops over dates.

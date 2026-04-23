@@ -986,7 +986,7 @@ with tab_track:
                 action_doc = tracking_data[selected_sku]
                 created_on = action_doc.get("createdOn")
                 action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-                td = get_tracking_data(selected_sku, action_iso, days_back=375)
+                td = get_tracking_data(selected_sku, action_iso, days_back=375, _excluded_channels=",".join(sorted(config.EXCLUDED_CHANNELS)))
 
                 last_14d = td["last_14d_rate"]
                 last_14d_str = f"{last_14d:.1%}" if last_14d is not None and last_14d > 0 else ("No data" if last_14d is None or last_14d == 0 else f"{last_14d:.1%}")
