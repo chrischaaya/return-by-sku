@@ -132,7 +132,6 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     now = datetime.now(timezone.utc)
 
     graph_start = min(action_date - timedelta(days=30), now - timedelta(days=180))
-    graph_end = now - timedelta(days=config.SLOW_DELIVERY_LAG_DAYS)  # exclude recent data (delivery lag)
 
     # Use preloaded data if available, otherwise fetch individually
     if _preloaded and sku_prefix in _preloaded:
@@ -150,21 +149,11 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     if df_ord.empty:
         return _empty_result(pos)
 
-    # Remove anomalous return days (bulk data events)
-    # A day with >10x the median daily returns is an artifact
-    if not df_ret.empty:
-        daily_totals = df_ret.groupby("date")["returned"].sum()
-        median_daily = daily_totals.median()
-        if median_daily > 0:
-            bad_dates = daily_totals[daily_totals > median_daily * 10].index.tolist()
-            if bad_dates:
-                df_ret = df_ret[~df_ret["date"].isin(bad_dates)]
-
     # Get all sizes
     all_sizes = sorted(set(df_ord["size"].unique()) | set(df_ret["size"].unique()) if not df_ret.empty else set(df_ord["size"].unique()))
 
-    # Build complete date range (excluding last 7 days)
-    date_range = pd.date_range(graph_start.date(), graph_end.date(), freq="D")
+    # Build complete date range
+    date_range = pd.date_range(graph_start.date(), now.date(), freq="D")
 
     # Minimum sales in a 7-day window to show a data point (suppresses noise)
     MIN_WINDOW_SOLD = 5  # overall
