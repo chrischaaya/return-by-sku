@@ -441,10 +441,7 @@ def _render_review_html(r, turkish=False):
             date_str = dt.strftime("%d %b %Y")
     else:
         date_str = ""
-    if turkish:
-        comment = r.get("originalComment") or r.get("comments", "") or ""
-    else:
-        comment = r.get("comments") or r.get("originalComment", "") or ""
+    comment = r.get("originalComment") or r.get("comments", "") or ""
     name = r.get("name", "")
     title = r.get("reviewTitle", "")
     title_html = f"<b>{title}</b><br>" if title else ""
