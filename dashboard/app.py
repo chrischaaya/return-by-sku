@@ -762,7 +762,7 @@ def _render_expanded_graph(r):
         yaxis=dict(tickformat=".0%", title="", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0", range=[x_min, x_max]),
         height=320, margin=dict(t=20, b=30, l=40, r=10),
-        plot_bgcolor="white", legend=dict(orientation="h", y=-0.15), hovermode="x unified",
+        plot_bgcolor="white", legend=dict(orientation="h", y=-0.25), hovermode="x unified",
     )
     st.plotly_chart(fig, use_container_width=True)
 
