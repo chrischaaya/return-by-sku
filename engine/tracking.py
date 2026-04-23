@@ -120,114 +120,94 @@ def preload_tracking_batch(cache_key: str, sku_action_pairs_json: str) -> dict:
     return result
 
 
-@st.cache_data(ttl=300)
-def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = None) -> dict:
+@st.cache_data(ttl=3600)
+def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90, _preloaded: dict = None) -> dict:
     """
     Compute all tracking data for a single SKU.
-    action_date_str is ISO format string (cache-friendly).
-    _preloaded: optional pre-fetched {df_ord, df_ret} from batch load.
-    Returns dict with: rolling_df, pos, last_14d_rate, pre_po_rate, lifetime_rate, badge.
+    Vectorized rolling computation — no Python loops over dates.
     """
     action_date = datetime.fromisoformat(action_date_str).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
+    graph_start = now - timedelta(days=days_back)
 
-    graph_start = now - timedelta(days=360)
-
-    # Use preloaded data if available, otherwise fetch individually
-    if _preloaded and sku_prefix in _preloaded:
-        daily_orders = _preloaded[sku_prefix]["df_ord"].to_dict("records")
-        daily_returns = _preloaded[sku_prefix]["df_ret"].to_dict("records")
-    else:
-        daily_orders = pipelines.get_daily_orders_for_sku(sku_prefix, graph_start, now)
-        daily_returns = pipelines.get_daily_returns_for_sku(sku_prefix, graph_start, now)
+    daily_orders = pipelines.get_daily_orders_for_sku(sku_prefix, graph_start, now)
+    daily_returns = pipelines.get_daily_returns_for_sku(sku_prefix, graph_start, now)
     pos = pipelines.get_sku_pos(sku_prefix, action_date)
 
-    # Build daily DataFrames
     df_ord = pd.DataFrame(daily_orders) if daily_orders else pd.DataFrame(columns=["date", "size", "sold"])
     df_ret = pd.DataFrame(daily_returns) if daily_returns else pd.DataFrame(columns=["date", "size", "returned"])
 
     if df_ord.empty:
         return _empty_result(pos)
 
-    # Get all sizes
-    all_sizes = sorted(set(df_ord["size"].unique()) | set(df_ret["size"].unique()) if not df_ret.empty else set(df_ord["size"].unique()))
+    # Pivot to daily totals per size (one row per date, one column per size)
+    df_ord["date"] = pd.to_datetime(df_ord["date"])
+    df_ret["date"] = pd.to_datetime(df_ret["date"]) if not df_ret.empty else df_ret["date"]
 
-    # Build complete date range
-    date_range = pd.date_range(graph_start.date(), now.date(), freq="D")
+    date_idx = pd.date_range(graph_start.date(), now.date(), freq="D")
 
-    # Minimum sales in a 7-day window to show a data point (suppresses noise)
-    MIN_WINDOW_SOLD = 5  # overall
-    MIN_WINDOW_SOLD_SIZE = 5  # per size
+    # Overall daily totals
+    ord_daily = df_ord.groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
+    ret_daily = df_ret.groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
 
-    # Compute rolling 7-day return rate per size + overall
-    rolling_rows = []
-    size_total_sold = {s: 0 for s in all_sizes}
+    # Rolling 7-day sums (vectorized)
+    MIN_WINDOW_SOLD = 5
+    ord_roll = ord_daily.rolling(7, min_periods=1).sum()
+    ret_roll = ret_daily.rolling(7, min_periods=1).sum()
+    overall_rate = (ret_roll / ord_roll).where(ord_roll >= MIN_WINDOW_SOLD)
+    overall_rate = overall_rate.clip(upper=1.0)
 
-    for d in date_range:
-        d_str = d.strftime("%Y-%m-%d")
-        w_start = (d - timedelta(days=7)).strftime("%Y-%m-%d")
+    rolling_df = pd.DataFrame({"date": date_idx, "overall_rate": overall_rate.values, "overall_sold": ord_roll.values.astype(int)})
 
-        sold_window = df_ord[(df_ord["date"] > w_start) & (df_ord["date"] <= d_str)]
-        ret_window = df_ret[(df_ret["date"] > w_start) & (df_ret["date"] <= d_str)] if not df_ret.empty else pd.DataFrame(columns=["date", "size", "returned"])
+    # Per-size rolling rates (vectorized per size)
+    all_sizes_set = set(df_ord["size"].unique())
+    if not df_ret.empty:
+        all_sizes_set |= set(df_ret["size"].unique())
+    all_sizes = sorted(all_sizes_set)
 
-        total_sold = sold_window["sold"].sum()
-        total_returned = ret_window["returned"].sum() if not ret_window.empty else 0
+    MIN_WINDOW_SOLD_SIZE = 5
+    size_total_sold = {}
+    for size in all_sizes:
+        s_ord = df_ord[df_ord["size"] == size].groupby("date")["sold"].sum().reindex(date_idx, fill_value=0)
+        s_ret = df_ret[df_ret["size"] == size].groupby("date")["returned"].sum().reindex(date_idx, fill_value=0) if not df_ret.empty else pd.Series(0, index=date_idx)
+        s_ord_roll = s_ord.rolling(7, min_periods=1).sum()
+        s_ret_roll = s_ret.rolling(7, min_periods=1).sum()
+        rate = (s_ret_roll / s_ord_roll).where(s_ord_roll >= MIN_WINDOW_SOLD_SIZE).clip(upper=1.0)
+        rolling_df[f"rate_{size}"] = rate.values
+        size_total_sold[size] = int(s_ord.sum())
 
-        row = {
-            "date": d_str,
-            "overall_rate": min(total_returned / total_sold, 1.0) if total_sold >= MIN_WINDOW_SOLD else None,
-            "overall_sold": int(total_sold),
-        }
-
-        for size in all_sizes:
-            s_sold = sold_window[sold_window["size"] == size]["sold"].sum()
-            s_ret = ret_window[ret_window["size"] == size]["returned"].sum() if not ret_window.empty else 0
-            size_total_sold[size] += s_sold
-            row[f"rate_{size}"] = min(s_ret / s_sold, 1.0) if s_sold >= MIN_WINDOW_SOLD_SIZE else None
-
-        rolling_rows.append(row)
-
-    rolling_df = pd.DataFrame(rolling_rows)
-    rolling_df["date"] = pd.to_datetime(rolling_df["date"])
-
-    # Only keep sizes with meaningful total volume (top sizes covering 95% of sales)
-    sorted_sizes = sorted(all_sizes, key=lambda s: size_total_sold[s], reverse=True)
+    # Only keep sizes covering 95% of sales
+    sorted_sizes = sorted(all_sizes, key=lambda s: size_total_sold.get(s, 0), reverse=True)
     cumulative = 0
     total_all = sum(size_total_sold.values())
     visible_sizes = []
     for s in sorted_sizes:
-        if size_total_sold[s] == 0:
+        if size_total_sold.get(s, 0) == 0:
             continue
         visible_sizes.append(s)
         cumulative += size_total_sold[s]
         if total_all > 0 and cumulative / total_all >= 0.95:
             break
-    all_sizes = visible_sizes
 
-    # Last 14 days rate (simple, not rolling)
+    # Last 14 days rate
     lag_days = config.SLOW_DELIVERY_LAG_DAYS
-    end_14d = now - timedelta(days=lag_days)
-    start_14d = end_14d - timedelta(days=14)
-    s14 = start_14d.strftime("%Y-%m-%d")
-    e14 = end_14d.strftime("%Y-%m-%d")
+    e14 = (now - timedelta(days=lag_days)).strftime("%Y-%m-%d")
+    s14 = (now - timedelta(days=lag_days + 14)).strftime("%Y-%m-%d")
     sold_14d = df_ord[(df_ord["date"] >= s14) & (df_ord["date"] <= e14)]["sold"].sum()
     ret_14d = df_ret[(df_ret["date"] >= s14) & (df_ret["date"] <= e14)]["returned"].sum() if not df_ret.empty else 0
     last_14d_rate = min(ret_14d / sold_14d, 1.0) if sold_14d > 0 else None
 
-    # Pre-PO baseline (30 days before first PO received)
     pre_po_rate = _compute_pre_po_rate(df_ord, df_ret, pos)
 
-    # Lifetime rate
     total_sold = df_ord["sold"].sum()
     total_ret = df_ret["returned"].sum() if not df_ret.empty else 0
     lifetime_rate = min(total_ret / total_sold, 1.0) if total_sold > 0 else 0
 
-    # Badge
     badge = _compute_badge(last_14d_rate, pre_po_rate, pos)
 
     return {
         "rolling_df": rolling_df,
-        "sizes": all_sizes,
+        "sizes": visible_sizes,
         "pos": pos,
         "last_14d_rate": last_14d_rate,
         "pre_po_rate": pre_po_rate,
