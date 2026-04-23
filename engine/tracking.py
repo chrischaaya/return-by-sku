@@ -57,6 +57,7 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     now = datetime.now(timezone.utc)
 
     graph_start = min(action_date - timedelta(days=30), now - timedelta(days=180))
+    graph_end = now - timedelta(days=7)  # exclude last 7 days (delivery lag)
 
     # Use preloaded data if available, otherwise fetch individually
     if _preloaded and sku_prefix in _preloaded:
@@ -77,8 +78,8 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = 
     # Get all sizes
     all_sizes = sorted(set(df_ord["size"].unique()) | set(df_ret["size"].unique()) if not df_ret.empty else set(df_ord["size"].unique()))
 
-    # Build complete date range
-    date_range = pd.date_range(graph_start.date(), now.date(), freq="D")
+    # Build complete date range (excluding last 7 days)
+    date_range = pd.date_range(graph_start.date(), graph_end.date(), freq="D")
 
     # Minimum sales in a 7-day window to show a data point (suppresses noise)
     MIN_WINDOW_SOLD = 5  # overall

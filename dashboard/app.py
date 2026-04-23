@@ -635,8 +635,8 @@ BADGE_STYLES = {
 SIZE_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#84cc16"]
 
 
-def render_tracking_card(sku_prefix, action_doc, preloaded=None):
-    """Render a single action-tracked SKU as a collapsible card with graph."""
+def _build_tracking_info(sku_prefix, action_doc, preloaded=None):
+    """Build display data for a tracking card without rendering."""
     row = df_sku[df_sku["sku_prefix"] == sku_prefix]
     name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
     img_url = row.iloc[0].get("image_url") if not row.empty else None
@@ -670,66 +670,82 @@ def render_tracking_card(sku_prefix, action_doc, preloaded=None):
         po_text = "No PO yet"
         po_detail = "—"
 
+    return {
+        "sku_prefix": sku_prefix, "name": name, "img_url": img_url, "has_img": has_img,
+        "supplier": supplier, "pm": pm, "action_summary": action_summary,
+        "created_on": created_on, "days_ago": days_ago, "date_str": date_str,
+        "td": td, "badge_style": badge_style, "badge_label": badge_label,
+        "last_14d": last_14d, "pre_po": pre_po, "lifetime": lifetime,
+        "po_text": po_text, "po_detail": po_detail,
+    }
+
+
+def render_tracking_card_compact(info):
+    """Render a compact tracking card (no graph)."""
+    sku_prefix = info["sku_prefix"]
+    is_selected = st.session_state.get("track_selected") == sku_prefix
+
+    border_style = "border-left:4px solid #1a73e8;" if is_selected else ""
     with st.container(border=True):
-        if has_img:
-            ic, mc = st.columns([1, 8])
-        else:
-            ic, mc = None, st.container()
-        if ic:
-            with ic:
-                st.image(img_url, width=60)
-        with mc:
-            hc1, hc2 = st.columns([6, 1])
-            with hc1:
-                st.markdown(f"**{name}**")
-                st.caption(f"{sku_prefix} · {supplier} · PM: {pm or 'N/A'}")
-            with hc2:
-                st.markdown(f'<div style="text-align:right;"><span style="{badge_style} font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px;">{badge_label}</span></div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="{border_style}"></div>', unsafe_allow_html=True) if is_selected else None
+        top1, top2, top3 = st.columns([1, 7, 1])
+        with top1:
+            if info["has_img"]:
+                st.image(info["img_url"], width=50)
+        with top2:
+            st.markdown(f"**{info['name']}**")
+            st.caption(f"{sku_prefix} · {info['supplier']} · PM: {info['pm'] or 'N/A'} · Action: {info['date_str']} ({info['days_ago']}d ago)")
+        with top3:
+            st.markdown(f'<div style="text-align:right;"><span style="{info["badge_style"]} font-size:11px; font-weight:600; padding:3px 10px; border-radius:12px;">{info["badge_label"]}</span></div>', unsafe_allow_html=True)
 
-            st.markdown(
-                f'<div style="padding:8px 12px; border-left:4px solid #f59e0b; background:#fffbeb; border-radius:4px; font-size:12px; margin:4px 0;">'
-                f'<b>Action:</b> {action_summary}<br>'
-                f'<span style="color:#888;">Taken {date_str} ({days_ago} days ago)</span>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-            mc1, mc2, mc3, mc4 = st.columns(4)
-            with mc1:
-                st.markdown(f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;"><div style="font-size:10px; color:#888; text-transform:uppercase;">Last 14 days</div><div style="font-size:18px; font-weight:700; margin-top:2px;">{last_14d}</div></div>', unsafe_allow_html=True)
-            with mc2:
-                st.markdown(f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;"><div style="font-size:10px; color:#888; text-transform:uppercase;">Pre-PO (30d)</div><div style="font-size:18px; font-weight:700; margin-top:2px;">{pre_po}</div></div>', unsafe_allow_html=True)
-            with mc3:
-                st.markdown(f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;"><div style="font-size:10px; color:#888; text-transform:uppercase;">Lifetime</div><div style="font-size:18px; font-weight:700; margin-top:2px;">{lifetime}</div></div>', unsafe_allow_html=True)
-            with mc4:
-                st.markdown(f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:8px 12px;"><div style="font-size:10px; color:#888; text-transform:uppercase;">New PO</div><div style="font-size:13px; font-weight:600; margin-top:4px;">{po_text}</div><div style="font-size:11px; color:#888;">{po_detail}</div></div>', unsafe_allow_html=True)
-
-        with st.expander("Return rate trend", expanded=False):
-            _render_tracking_graph(sku_prefix, td, created_on, action_summary)
-
-        if st.button("Dismiss", key=f"dismiss_{sku_prefix}"):
-            dismiss_sku(sku_prefix)
-            st.toast(f"Dismissed: {name}")
-            st.rerun()
+        mc1, mc2, mc3, mc4, mc5, mc6 = st.columns([2, 1.5, 1.5, 1.5, 1.5, 1])
+        with mc1:
+            st.markdown(f'<div style="font-size:11px; color:#888; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="{info["action_summary"]}">{info["action_summary"][:60]}{"..." if len(info["action_summary"]) > 60 else ""}</div>', unsafe_allow_html=True)
+        with mc2:
+            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">14d:</span> <b>{info["last_14d"]}</b></div>', unsafe_allow_html=True)
+        with mc3:
+            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">Pre-PO:</span> <b>{info["pre_po"]}</b></div>', unsafe_allow_html=True)
+        with mc4:
+            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">Lifetime:</span> <b>{info["lifetime"]}</b></div>', unsafe_allow_html=True)
+        with mc5:
+            st.markdown(f'<div style="font-size:12px;"><span style="color:#888;">PO:</span> <b>{info["po_text"]}</b></div>', unsafe_allow_html=True)
+        with mc6:
+            bc1, bc2 = st.columns(2)
+            with bc1:
+                if st.button("📊", key=f"sel_{sku_prefix}", help="Show in graph"):
+                    st.session_state["track_selected"] = sku_prefix
+                    st.rerun()
+            with bc2:
+                if st.button("✕", key=f"dismiss_{sku_prefix}", help="Dismiss"):
+                    dismiss_sku(sku_prefix)
+                    if st.session_state.get("track_selected") == sku_prefix:
+                        st.session_state.pop("track_selected", None)
+                    st.toast(f"Dismissed: {info['name']}")
+                    st.rerun()
 
 
-def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
-    """Render the Plotly time-series graph for a tracked SKU."""
+def render_tracking_graph(info):
+    """Render the Plotly time-series graph for the selected tracked SKU."""
+    td = info["td"]
+    action_date = info["created_on"]
+    action_summary = info["action_summary"]
     rolling_df = td["rolling_df"]
+
     if rolling_df.empty:
-        st.caption("Not enough data for graph")
+        st.info(f"Not enough data for **{info['name']}** yet.")
         return
 
-    tf1, tf2, tf3, tf4 = st.columns(4)
-    tf_key = f"tf_{sku_prefix}"
-    with tf1:
-        if st.button("30d", key=f"{tf_key}_30"): st.session_state[tf_key] = 30
-    with tf2:
-        if st.button("60d", key=f"{tf_key}_60"): st.session_state[tf_key] = 60
-    with tf3:
-        if st.button("90d", key=f"{tf_key}_90"): st.session_state[tf_key] = 90
-    with tf4:
-        if st.button("All", key=f"{tf_key}_all"): st.session_state[tf_key] = 0
+    # Time filter
+    tf_key = "track_tf"
+    tfc = st.columns([1, 1, 1, 1, 6])
+    with tfc[0]:
+        if st.button("30d", key="tf_30"): st.session_state[tf_key] = 30
+    with tfc[1]:
+        if st.button("60d", key="tf_60"): st.session_state[tf_key] = 60
+    with tfc[2]:
+        if st.button("90d", key="tf_90"): st.session_state[tf_key] = 90
+    with tfc[3]:
+        if st.button("All", key="tf_all"): st.session_state[tf_key] = 0
 
     days_filter = st.session_state.get(tf_key, 90)
     df = rolling_df.copy()
@@ -778,7 +794,6 @@ def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
             fig.add_shape(type="line", x0=r_str, x1=r_str, y0=0, y1=1, yref="paper", line=dict(color="#16a34a", width=2, dash="dash"))
             fig.add_annotation(x=r_str, y=1, yref="paper", text=f"PO ({units}u)", showarrow=False, font=dict(color="#16a34a", size=10), yshift=10)
 
-    # Smart Y-axis: cap at P95 of visible values + 5pp headroom, minimum 10%
     all_vals = df["overall_rate"].dropna().tolist()
     for size in td["sizes"]:
         col = f"rate_{size}"
@@ -786,15 +801,16 @@ def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
             all_vals.extend(df[col].dropna().tolist())
     if all_vals:
         p95 = sorted(all_vals)[int(len(all_vals) * 0.95)] if len(all_vals) > 5 else max(all_vals)
-        y_max = max(min(p95 + 0.05, 1.0), 0.10)  # at least 10%, cap at 100%
+        y_max = max(min(p95 + 0.05, 1.0), 0.10)
     else:
         y_max = 0.5
 
     fig.update_layout(
+        title=dict(text=f"{info['name']} ({info['sku_prefix']})", font=dict(size=14)),
         yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0"),
-        height=360,
-        margin=dict(t=30, b=40, l=50, r=20),
+        height=380,
+        margin=dict(t=40, b=40, l=50, r=20),
         plot_bgcolor="white",
         legend=dict(orientation="h", y=-0.15),
         hovermode="x unified",
@@ -802,6 +818,7 @@ def _render_tracking_graph(sku_prefix, td, action_date, action_summary):
 
     st.plotly_chart(fig, use_container_width=True)
 
+    # Timeline summary
     lines = []
     if action_date:
         lines.append(f"<span style='color:#f59e0b;'>&#9679;</span> Action taken {action_date.strftime('%d %b %Y')} — {action_summary}")
@@ -944,29 +961,41 @@ with tab_track:
     if not tracking_data:
         st.info("No actions taken yet. Mark products as 'Action taken' from the Needs Attention tab.")
     else:
-        track_search = st.text_input("Search", placeholder="Search by product name or SKU...", key="track_search", label_visibility="collapsed")
-
-        # Sort by action date (most recent first) and apply search
+        # Sort by action date (most recent first)
         sorted_tracking = sorted(tracking_data.items(), key=lambda x: x[1].get("createdOn", datetime.min), reverse=True)
-        if track_search:
-            q = track_search.lower()
-            filtered = []
-            for sku_prefix, action_doc in sorted_tracking:
-                row = df_sku[df_sku["sku_prefix"] == sku_prefix]
-                name = row.iloc[0]["product_name"] if not row.empty else ""
-                if q in sku_prefix.lower() or q in str(name).lower():
-                    filtered.append((sku_prefix, action_doc))
-            sorted_tracking = filtered
 
-        st.caption(f"{len(sorted_tracking)} products being tracked")
-
-        # Batch preload: 2 queries for all SKUs instead of 2 per SKU
+        # Batch preload all tracking data
         import json
         pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
         preloaded = preload_tracking_batch(json.dumps(pairs))
 
+        # Build info for all cards
+        all_infos = {}
         for sku_prefix, action_doc in sorted_tracking:
-            render_tracking_card(sku_prefix, action_doc, preloaded)
+            all_infos[sku_prefix] = _build_tracking_info(sku_prefix, action_doc, preloaded)
+
+        # Auto-select first if nothing selected
+        if st.session_state.get("track_selected") not in all_infos and all_infos:
+            st.session_state["track_selected"] = list(all_infos.keys())[0]
+
+        # ── Graph at top ──
+        selected = st.session_state.get("track_selected")
+        if selected and selected in all_infos:
+            render_tracking_graph(all_infos[selected])
+
+        st.markdown("---")
+
+        # ── Search + compact cards below ──
+        track_search = st.text_input("Search", placeholder="Search tracked products...", key="track_search", label_visibility="collapsed")
+
+        display_infos = list(all_infos.values())
+        if track_search:
+            q = track_search.lower()
+            display_infos = [i for i in display_infos if q in i["sku_prefix"].lower() or q in str(i["name"]).lower()]
+
+        st.caption(f"{len(display_infos)} products being tracked")
+        for info in display_infos:
+            render_tracking_card_compact(info)
 
 # =====================================================================
 # TAB 3: PARKED
