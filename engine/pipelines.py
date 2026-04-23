@@ -496,14 +496,18 @@ def get_orders_count_for_skus(sku_prefixes: list, start_date: datetime, end_date
 
 
 def get_returns_count_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> dict:
-    """Fast: total returned per SKU in a date range. Returns {sku_prefix: returned}."""
+    """Total returned per SKU, grouped by ORDER date. Returns {sku_prefix: returned}."""
     db = get_db()
     if not sku_prefixes:
         return {}
     pipeline = [
-        {"$match": {"date": {"$gte": start_date, "$lte": end_date}, "salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
+        {"$match": {"salesChannel": {"$nin": config.EXCLUDED_CHANNELS}}},
         {"$unwind": "$items"},
         {"$match": {"items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES}, "items.skuPrefix": {"$in": sku_prefixes}}},
+        {"$lookup": {"from": config.COLL_ORDERS, "localField": "orderId", "foreignField": "orderId", "as": "_order"}},
+        {"$unwind": {"path": "$_order", "preserveNullAndEmptyArrays": True}},
+        {"$addFields": {"orderDate": {"$ifNull": ["$_order.createdOn", "$date"]}}},
+        {"$match": {"orderDate": {"$gte": start_date, "$lte": end_date}}},
         {"$group": {"_id": "$items.skuPrefix", "returned": {"$sum": "$items.quantity"}}},
     ]
     return {r["_id"]: r["returned"] for r in db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True)}
@@ -590,7 +594,7 @@ def get_daily_orders_for_skus(sku_prefixes: list, start_date: datetime, end_date
 
 def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
     """
-    Daily return counts per (skuPrefix, size) for multiple SKUs in one query.
+    Daily return counts per (skuPrefix, size) for multiple SKUs, grouped by ORDER date.
     Returns [{sku_prefix, date, size, returned}, ...].
     """
     db = get_db()
@@ -599,7 +603,6 @@ def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_dat
     pipeline = [
         {
             "$match": {
-                "date": {"$gte": start_date, "$lte": end_date},
                 "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
             }
         },
@@ -611,10 +614,21 @@ def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_dat
             }
         },
         {
+            "$lookup": {
+                "from": config.COLL_ORDERS,
+                "localField": "orderId",
+                "foreignField": "orderId",
+                "as": "_order",
+            }
+        },
+        {"$unwind": {"path": "$_order", "preserveNullAndEmptyArrays": True}},
+        {"$addFields": {"orderDate": {"$ifNull": ["$_order.createdOn", "$date"]}}},
+        {"$match": {"orderDate": {"$gte": start_date, "$lte": end_date}}},
+        {
             "$group": {
                 "_id": {
                     "skuPrefix": "$items.skuPrefix",
-                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$date"}},
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$orderDate"}},
                     "size": "$items.size",
                 },
                 "returned": {"$sum": "$items.quantity"},
@@ -673,14 +687,15 @@ def get_daily_orders_for_sku(sku_prefix: str, start_date: datetime, end_date: da
 
 def get_daily_returns_for_sku(sku_prefix: str, start_date: datetime, end_date: datetime) -> list:
     """
-    Daily return counts per size for a single SKU.
-    Returns [{date, size, returned}, ...] — one row per (date, size).
+    Daily return counts per size for a single SKU, grouped by ORDER date.
+    A return filed today for an order from 2 weeks ago counts on the order's date.
+    Uses $lookup to join CustomerReturns.orderId → Orders.orderId to get order createdOn.
+    Returns [{date, size, returned}, ...] — one row per (order_date, size).
     """
     db = get_db()
     pipeline = [
         {
             "$match": {
-                "date": {"$gte": start_date, "$lte": end_date},
                 "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
             }
         },
@@ -692,9 +707,28 @@ def get_daily_returns_for_sku(sku_prefix: str, start_date: datetime, end_date: d
             }
         },
         {
+            "$lookup": {
+                "from": config.COLL_ORDERS,
+                "localField": "orderId",
+                "foreignField": "orderId",
+                "as": "_order",
+            }
+        },
+        {"$unwind": {"path": "$_order", "preserveNullAndEmptyArrays": True}},
+        {
+            "$addFields": {
+                "orderDate": {"$ifNull": ["$_order.createdOn", "$date"]},
+            }
+        },
+        {
+            "$match": {
+                "orderDate": {"$gte": start_date, "$lte": end_date},
+            }
+        },
+        {
             "$group": {
                 "_id": {
-                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$date"}},
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$orderDate"}},
                     "size": "$items.size",
                 },
                 "returned": {"$sum": "$items.quantity"},
