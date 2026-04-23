@@ -14,20 +14,57 @@ from engine import pipelines
 
 
 @st.cache_data(ttl=300)
-def get_tracking_data(sku_prefix: str, action_date_str: str) -> dict:
+def preload_tracking_batch(sku_action_pairs_json: str) -> dict:
+    """
+    Batch-fetch daily orders and returns for all tracked SKUs in 2 queries.
+    sku_action_pairs_json: JSON string of [[sku_prefix, action_date_iso], ...]
+    Returns dict of sku_prefix -> {df_ord, df_ret}.
+    """
+    import json
+    pairs = json.loads(sku_action_pairs_json)
+    if not pairs:
+        return {}
+
+    now = datetime.now(timezone.utc)
+    sku_prefixes = [p[0] for p in pairs]
+    earliest_action = min(datetime.fromisoformat(p[1]).replace(tzinfo=timezone.utc) for p in pairs)
+    graph_start = min(earliest_action - timedelta(days=30), now - timedelta(days=180))
+
+    all_orders = pipelines.get_daily_orders_for_skus(sku_prefixes, graph_start, now)
+    all_returns = pipelines.get_daily_returns_for_skus(sku_prefixes, graph_start, now)
+
+    df_all_ord = pd.DataFrame(all_orders) if all_orders else pd.DataFrame(columns=["sku_prefix", "date", "size", "sold"])
+    df_all_ret = pd.DataFrame(all_returns) if all_returns else pd.DataFrame(columns=["sku_prefix", "date", "size", "returned"])
+
+    result = {}
+    for sku in sku_prefixes:
+        result[sku] = {
+            "df_ord": df_all_ord[df_all_ord["sku_prefix"] == sku].drop(columns=["sku_prefix"]).reset_index(drop=True) if not df_all_ord.empty else pd.DataFrame(columns=["date", "size", "sold"]),
+            "df_ret": df_all_ret[df_all_ret["sku_prefix"] == sku].drop(columns=["sku_prefix"]).reset_index(drop=True) if not df_all_ret.empty else pd.DataFrame(columns=["date", "size", "returned"]),
+        }
+    return result
+
+
+@st.cache_data(ttl=300)
+def get_tracking_data(sku_prefix: str, action_date_str: str, _preloaded: dict = None) -> dict:
     """
     Compute all tracking data for a single SKU.
     action_date_str is ISO format string (cache-friendly).
+    _preloaded: optional pre-fetched {df_ord, df_ret} from batch load.
     Returns dict with: rolling_df, pos, last_14d_rate, pre_po_rate, lifetime_rate, badge.
     """
     action_date = datetime.fromisoformat(action_date_str).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
 
-    # Fetch data: go back 180 days or to action_date - 30d, whichever is earlier
     graph_start = min(action_date - timedelta(days=30), now - timedelta(days=180))
 
-    daily_orders = pipelines.get_daily_orders_for_sku(sku_prefix, graph_start, now)
-    daily_returns = pipelines.get_daily_returns_for_sku(sku_prefix, graph_start, now)
+    # Use preloaded data if available, otherwise fetch individually
+    if _preloaded and sku_prefix in _preloaded:
+        daily_orders = _preloaded[sku_prefix]["df_ord"].to_dict("records")
+        daily_returns = _preloaded[sku_prefix]["df_ret"].to_dict("records")
+    else:
+        daily_orders = pipelines.get_daily_orders_for_sku(sku_prefix, graph_start, now)
+        daily_returns = pipelines.get_daily_returns_for_sku(sku_prefix, graph_start, now)
     pos = pipelines.get_sku_pos(sku_prefix, action_date)
 
     # Build daily DataFrames
@@ -44,8 +81,8 @@ def get_tracking_data(sku_prefix: str, action_date_str: str) -> dict:
     date_range = pd.date_range(graph_start.date(), now.date(), freq="D")
 
     # Minimum sales in a 7-day window to show a data point (suppresses noise)
-    MIN_WINDOW_SOLD = 3  # overall
-    MIN_WINDOW_SOLD_SIZE = 2  # per size
+    MIN_WINDOW_SOLD = 5  # overall
+    MIN_WINDOW_SOLD_SIZE = 5  # per size
 
     # Compute rolling 7-day return rate per size + overall
     rolling_rows = []

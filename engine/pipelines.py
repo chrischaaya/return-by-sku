@@ -436,6 +436,92 @@ def get_sku_review_comments(sku_prefix: str, limit: int = 200) -> list:
     return list(db["ProductReviews"].aggregate(pipeline))
 
 
+def get_daily_orders_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
+    """
+    Daily order counts per (skuPrefix, size) for multiple SKUs in one query.
+    Returns [{sku_prefix, date, size, sold}, ...].
+    """
+    db = get_db()
+    if not sku_prefixes:
+        return []
+    pipeline = [
+        {
+            "$match": {
+                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+                "status": {"$in": config.VALID_ORDER_STATUSES},
+            }
+        },
+        {"$unwind": "$lineItems"},
+        {"$match": {"lineItems.skuPrefix": {"$in": sku_prefixes}}},
+        {
+            "$group": {
+                "_id": {
+                    "skuPrefix": "$lineItems.skuPrefix",
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "size": "$lineItems.size",
+                },
+                "sold": {"$sum": "$lineItems.quantity"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id.skuPrefix",
+                "date": "$_id.date",
+                "size": "$_id.size",
+                "sold": 1,
+            }
+        },
+    ]
+    return list(db[config.COLL_ORDERS].aggregate(pipeline, allowDiskUse=True))
+
+
+def get_daily_returns_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
+    """
+    Daily return counts per (skuPrefix, size) for multiple SKUs in one query.
+    Returns [{sku_prefix, date, size, returned}, ...].
+    """
+    db = get_db()
+    if not sku_prefixes:
+        return []
+    pipeline = [
+        {
+            "$match": {
+                "createdOn": {"$gte": start_date, "$lte": end_date},
+                "salesChannel": {"$nin": config.EXCLUDED_CHANNELS},
+            }
+        },
+        {"$unwind": "$items"},
+        {
+            "$match": {
+                "items.status": {"$in": config.VALID_RETURN_ITEM_STATUSES},
+                "items.skuPrefix": {"$in": sku_prefixes},
+            }
+        },
+        {
+            "$group": {
+                "_id": {
+                    "skuPrefix": "$items.skuPrefix",
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$createdOn"}},
+                    "size": "$items.size",
+                },
+                "returned": {"$sum": "$items.quantity"},
+            }
+        },
+        {
+            "$project": {
+                "_id": 0,
+                "sku_prefix": "$_id.skuPrefix",
+                "date": "$_id.date",
+                "size": "$_id.size",
+                "returned": 1,
+            }
+        },
+    ]
+    return list(db[config.COLL_RETURNS].aggregate(pipeline, allowDiskUse=True))
+
+
 def get_daily_orders_for_sku(sku_prefix: str, start_date: datetime, end_date: datetime) -> list:
     """
     Daily order counts per size for a single SKU.

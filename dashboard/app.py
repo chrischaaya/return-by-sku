@@ -31,7 +31,7 @@ from engine.cache import save_cache, load_cache, get_cache_age
 from engine.settings import load_settings, save_settings, DEFAULTS
 from anthropic import Anthropic
 from engine.pipelines import get_sku_review_comments
-from engine.tracking import get_tracking_data
+from engine.tracking import get_tracking_data, preload_tracking_batch
 import plotly.graph_objects as go
 
 SIZE_ORDER = [
@@ -635,7 +635,7 @@ BADGE_STYLES = {
 SIZE_COLORS = ["#ef4444", "#3b82f6", "#22c55e", "#a855f7", "#f97316", "#06b6d4", "#ec4899", "#84cc16"]
 
 
-def render_tracking_card(sku_prefix, action_doc):
+def render_tracking_card(sku_prefix, action_doc, preloaded=None):
     """Render a single action-tracked SKU as a collapsible card with graph."""
     row = df_sku[df_sku["sku_prefix"] == sku_prefix]
     name = row.iloc[0]["product_name"] if not row.empty else sku_prefix
@@ -650,7 +650,7 @@ def render_tracking_card(sku_prefix, action_doc):
     date_str = created_on.strftime("%d %b %Y") if created_on else "?"
 
     action_iso = created_on.isoformat() if created_on else datetime.now(timezone.utc).isoformat()
-    td = get_tracking_data(sku_prefix, action_iso)
+    td = get_tracking_data(sku_prefix, action_iso, _preloaded=preloaded)
 
     badge_key = td["badge"]
     badge_style, badge_label = BADGE_STYLES.get(badge_key, BADGE_STYLES["WAITING"])
@@ -959,8 +959,14 @@ with tab_track:
             sorted_tracking = filtered
 
         st.caption(f"{len(sorted_tracking)} products being tracked")
+
+        # Batch preload: 2 queries for all SKUs instead of 2 per SKU
+        import json
+        pairs = [[s, d.get("createdOn", datetime.now(timezone.utc)).isoformat()] for s, d in sorted_tracking]
+        preloaded = preload_tracking_batch(json.dumps(pairs))
+
         for sku_prefix, action_doc in sorted_tracking:
-            render_tracking_card(sku_prefix, action_doc)
+            render_tracking_card(sku_prefix, action_doc, preloaded)
 
 # =====================================================================
 # TAB 3: PARKED
