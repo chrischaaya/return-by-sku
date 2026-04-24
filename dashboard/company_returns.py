@@ -35,30 +35,35 @@ def _fmt_currency(v):
     return f"${v:.0f}"
 
 
-def _build_breakdown_table(df, group_col, group_label):
-    """Build a styled HTML breakdown table (supplier/category/channel)."""
+def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
+    """Build a styled HTML breakdown table with pagination, sorted by sold desc."""
     if df.empty:
-        return ""
+        st.caption("No data")
+        return
 
     df = df.copy()
     df["return_rate"] = df["returned"] / df["sold"].replace(0, 1)
     df["pct_value_return"] = df["returned_amount"] / df["gmv"].replace(0, 1)
-    df = df.sort_values("return_rate", ascending=False)
+    df = df.sort_values("sold", ascending=False).reset_index(drop=True)
 
     # Grand total
     total_sold = df["sold"].sum()
     total_returned = df["returned"].sum()
     total_gmv = df["gmv"].sum()
     total_ret_amt = df["returned_amount"].sum()
-    total = {
-        group_col: "Grand total",
-        "returned": total_returned,
-        "sold": total_sold,
-        "return_rate": total_returned / max(total_sold, 1),
-        "returned_amount": total_ret_amt,
-        "gmv": total_gmv,
-        "pct_value_return": total_ret_amt / max(total_gmv, 1),
-    }
+
+    # Pagination
+    total_rows = len(df)
+    total_pages = max(1, -(-total_rows // per_page))
+    pg_key = f"cr_pg_{table_key}"
+    if pg_key not in st.session_state:
+        st.session_state[pg_key] = 1
+    if st.session_state[pg_key] > total_pages:
+        st.session_state[pg_key] = 1
+    page = st.session_state[pg_key]
+    start = (page - 1) * per_page
+    end = min(start + per_page, total_rows)
+    page_df = df.iloc[start:end]
 
     cols = [group_label, "Returned", "Delivered", "Return Rate", "Returned Amt", "GMV", "% Value of Return"]
 
@@ -68,7 +73,7 @@ def _build_breakdown_table(df, group_col, group_label):
         html += f'<th style="padding:6px 10px; text-align:left;">{col}</th>'
     html += '</tr>'
 
-    for _, row in df.iterrows():
+    for _, row in page_df.iterrows():
         html += '<tr style="border-bottom:1px solid #eee;">'
         html += f'<td style="padding:5px 10px;">{row[group_col]}</td>'
         html += f'<td style="padding:5px 10px;">{_fmt_num(row["returned"])}</td>'
@@ -81,16 +86,34 @@ def _build_breakdown_table(df, group_col, group_label):
 
     # Grand total row
     html += '<tr style="background:#f0f0f0; font-weight:600; border-top:2px solid #ddd;">'
-    html += f'<td style="padding:5px 10px;">{total[group_col]}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_num(total["returned"])}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_num(total["sold"])}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_pct(total["return_rate"])}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_currency(total["returned_amount"])}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_currency(total["gmv"])}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_pct(total["pct_value_return"])}</td>'
+    html += f'<td style="padding:5px 10px;">Grand total</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_num(total_returned)}</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_num(total_sold)}</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_pct(total_returned / max(total_sold, 1))}</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_currency(total_ret_amt)}</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_currency(total_gmv)}</td>'
+    html += f'<td style="padding:5px 10px;">{_fmt_pct(total_ret_amt / max(total_gmv, 1))}</td>'
     html += '</tr></table>'
 
-    return html
+    st.markdown(html, unsafe_allow_html=True)
+
+    # Pagination controls
+    if total_pages > 1:
+        pc1, pc2, pc3 = st.columns([1, 3, 1])
+        with pc1:
+            if st.button("←", key=f"{pg_key}_prev", disabled=page <= 1):
+                st.session_state[pg_key] = page - 1
+                st.rerun()
+        with pc2:
+            st.markdown(
+                f'<div style="text-align:center; font-size:12px; color:#888; padding-top:6px;">'
+                f'{start+1}–{end} of {total_rows} · Page {page}/{total_pages}</div>',
+                unsafe_allow_html=True,
+            )
+        with pc3:
+            if st.button("→", key=f"{pg_key}_next", disabled=page >= total_pages):
+                st.session_state[pg_key] = page + 1
+                st.rerun()
 
 
 def render(actor: str):
@@ -254,18 +277,15 @@ def render(actor: str):
 
     # --- Breakdown tables ---
     st.markdown("### Supplier Return Breakdown")
-    html_supplier = _build_breakdown_table(data["by_supplier"], "supplier", "Supplier")
-    st.markdown(html_supplier, unsafe_allow_html=True)
+    _build_breakdown_table(data["by_supplier"], "supplier", "Supplier", "supplier")
 
     st.markdown('<div style="height:24px;"></div>', unsafe_allow_html=True)
 
     col_left, col_right = st.columns(2)
     with col_left:
         st.markdown("### Category Return Breakdown")
-        html_category = _build_breakdown_table(data["by_category"], "category", "Category")
-        st.markdown(html_category, unsafe_allow_html=True)
+        _build_breakdown_table(data["by_category"], "category", "Category", "category")
 
     with col_right:
         st.markdown("### Channel Return Breakdown")
-        html_channel = _build_breakdown_table(data["by_channel"], "channel", "Channel")
-        st.markdown(html_channel, unsafe_allow_html=True)
+        _build_breakdown_table(data["by_channel"], "channel", "Channel", "channel")
