@@ -1,5 +1,5 @@
 """
-Data cache in MongoDB (hiccup-tools.DataCache).
+Data cache in MongoDB (hiccup-tools.returns.DataCache).
 Split across multiple documents to stay under 16MB BSON limit.
 """
 
@@ -11,11 +11,6 @@ import pandas as pd
 import streamlit as st
 from pymongo import MongoClient
 
-WRITE_URI = (
-    "mongodb+srv://claude-hiccup-tools:LU6nLczES8GXzd5W"
-    "@hiccup-prod.clqls.mongodb.net/hiccup-tools"
-)
-
 _write_client = None
 
 CACHE_KEYS = ["df_sku", "df_sku_size", "df_supplier", "df_category"]
@@ -24,13 +19,13 @@ CACHE_KEYS = ["df_sku", "df_sku_size", "df_supplier", "df_category"]
 def _get_db():
     global _write_client
     if _write_client is None:
-        uri = st.secrets.get("MONGO_WRITE_URI", WRITE_URI)
+        uri = st.secrets["MONGO_WRITE_URI"]
         _write_client = MongoClient(uri, serverSelectionTimeoutMS=10000)
     return _write_client["hiccup-tools"]
 
 
 def _coll():
-    return _get_db()["DataCache"]
+    return _get_db()["returns.DataCache"]
 
 
 def save_cache(data: dict):

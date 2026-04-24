@@ -24,8 +24,8 @@ import config
 from engine.analyzer import load_data
 from engine.recommender import size_action, sku_summary
 from engine.actions import (
-    save_action, save_no_action, dismiss_sku, resolve_sku, add_new_action,
-    revert_no_action, revert_waiting, get_excluded_skus, get_skus_by_status, get_action,
+    save_action, save_no_action, resolve_sku, add_new_action,
+    revert_action, get_excluded_skus, get_skus_by_status, get_action,
 )
 from engine.cache import save_cache, load_cache, get_cache_age
 from engine.settings import load_settings, save_settings, DEFAULTS
@@ -33,6 +33,24 @@ from anthropic import Anthropic
 from engine.pipelines import get_sku_review_comments
 from engine.tracking import get_tracking_data, get_tracking_summaries
 import plotly.graph_objects as go
+
+# --- Authentication ---
+ALLOWED_DOMAIN = "hiccup.com"
+
+if not st.user.is_logged_in:
+    st.title("Return Investigation Tool")
+    st.markdown("Sign in with your @hiccup.com Google account to continue.")
+    st.login("google")
+    st.stop()
+
+# Verify domain
+_user_email = st.user.email or ""
+if not _user_email.endswith(f"@{ALLOWED_DOMAIN}"):
+    st.error(f"Access denied. Only @{ALLOWED_DOMAIN} accounts are allowed.")
+    st.logout()
+    st.stop()
+
+_actor = _user_email.split("@")[0]  # e.g. "chris" from "chris@hiccup.com"
 
 SIZE_ORDER = [
     "XXS", "XS", "S", "S/M", "M", "M/L", "L", "XL", "XXL", "2XL", "3XL", "4XL", "5XL",
@@ -96,7 +114,7 @@ st.markdown("""<style>
 </style>""", unsafe_allow_html=True)
 
 # --- Header ---
-h1, h2, h3 = st.columns([5, 1, 0.5])
+h1, h2, h3, h4 = st.columns([5, 1, 0.5, 0.6])
 with h1:
     st.title("Return Investigation Tool")
     st.caption(f"Last updated: {get_cache_age()}")
@@ -104,6 +122,11 @@ with h2:
     should_update = st.button("Refresh Data", use_container_width=True)
 with h3:
     show_settings = st.button("⚙️", use_container_width=True)
+with h4:
+    st.markdown(f'<div style="font-size:12px; color:#888; text-align:right; padding-top:8px;">{_actor}</div>', unsafe_allow_html=True)
+    if st.button("Logout", key="logout_btn", use_container_width=True):
+        st.logout()
+        st.rerun()
 
 use_turkish = False
 
@@ -619,7 +642,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
                     st.session_state[f"modal_{sku}"] = True
             with c2:
                 if st.button("✗ No action possible", key=f"noact_{sku}", use_container_width=True):
-                    save_no_action(sku)
+                    save_no_action(sku, _actor)
                     st.session_state.pop("computed", None)
                     st.rerun()
             if st.session_state.get(f"modal_{sku}"):
@@ -627,7 +650,7 @@ def render_product_card(row, is_rising=False, cta_mode="action"):
                 txt = st.text_area("What action was taken?", key=f"sum_{sku}", placeholder="e.g. Revised size chart with supplier")
                 if st.button("Submit", key=f"sub_{sku}"):
                     if txt.strip():
-                        save_action(sku, txt.strip(), float(rate))
+                        save_action(sku, txt.strip(), float(rate), _actor)
                         st.session_state.pop(f"modal_{sku}", None)
                         st.session_state.pop("computed", None)
                         st.rerun()
@@ -1006,7 +1029,7 @@ with tab_track:
                 bc1, bc2, bc3 = st.columns([5, 0.7, 0.8])
                 with bc2:
                     if st.button("✓ Resolved", key="resolve_selected", use_container_width=True):
-                        resolve_sku(selected_sku)
+                        resolve_sku(selected_sku, _actor)
                         st.session_state.pop("track_selected", None)
                         st.toast(f"Resolved: {selected_item['name']}")
                         st.rerun()
@@ -1018,7 +1041,7 @@ with tab_track:
                     new_txt = st.text_area("What action was taken?", key=f"new_act_txt_{selected_sku}", placeholder="e.g. Sent revised measurements to supplier")
                     if st.button("Submit", key="new_act_submit"):
                         if new_txt and new_txt.strip():
-                            add_new_action(selected_sku, new_txt.strip(), selected_item["lifetime"])
+                            add_new_action(selected_sku, new_txt.strip(), selected_item["lifetime"], _actor)
                             st.session_state.pop("new_action_modal", None)
                             st.toast("Action added!")
                             st.rerun()
@@ -1109,7 +1132,7 @@ with tab_park:
                     st.caption(sku)
                 with c3:
                     if st.button("↩ Revert", key=f"rvn_{sku}", use_container_width=True):
-                        revert_no_action(sku)
+                        revert_action(sku, _actor)
                         st.session_state.pop("computed", None)
                         st.rerun()
 
