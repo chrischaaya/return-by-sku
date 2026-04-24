@@ -33,6 +33,7 @@ from anthropic import Anthropic
 from engine.pipelines import get_sku_review_comments
 from engine.tracking import get_tracking_data, get_tracking_summaries
 import plotly.graph_objects as go
+from dashboard.company_returns import render as render_company_returns
 
 # --- Authentication ---
 ALLOWED_DOMAIN = "hiccup.com"
@@ -329,10 +330,11 @@ tracking_data = get_skus_by_status("tracking")
 parked_data = get_skus_by_status("no_action")
 
 # --- Tabs ---
-tab_att, tab_track, tab_park = st.tabs([
+tab_att, tab_track, tab_park, tab_company = st.tabs([
     f"Needs Attention ({len(needs_attention)})",
     f"Action Tracking ({len(tracking_data)})",
     f"Parked ({len(parked_data)})",
+    "Company Returns",
 ])
 
 
@@ -1141,6 +1143,12 @@ with tab_park:
                         st.session_state.pop("computed", None)
                         st.rerun()
 
+
+# =====================================================================
+# TAB 4: COMPANY RETURNS
+# =====================================================================
+with tab_company:
+    render_company_returns(_actor)
 
 # =====================================================================
 # SIDEBAR: AI CHAT
