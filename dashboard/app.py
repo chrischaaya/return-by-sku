@@ -37,17 +37,22 @@ import plotly.graph_objects as go
 # --- Authentication ---
 ALLOWED_DOMAIN = "hiccup.com"
 
-if not st.user.is_logged_in:
+_is_logged_in = getattr(st.user, "is_logged_in", False)
+if not _is_logged_in:
     st.title("Return Investigation Tool")
     st.markdown("Sign in with your @hiccup.com Google account to continue.")
-    st.login("google")
+    if hasattr(st, "login"):
+        st.login("google")
+    else:
+        st.error("Authentication requires Streamlit >= 1.42. Please update.")
     st.stop()
 
 # Verify domain
-_user_email = st.user.email or ""
+_user_email = getattr(st.user, "email", "") or ""
 if not _user_email.endswith(f"@{ALLOWED_DOMAIN}"):
     st.error(f"Access denied. Only @{ALLOWED_DOMAIN} accounts are allowed.")
-    st.logout()
+    if hasattr(st, "logout"):
+        st.logout()
     st.stop()
 
 _actor = _user_email.split("@")[0]  # e.g. "chris" from "chris@hiccup.com"
