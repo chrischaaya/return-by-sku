@@ -18,7 +18,7 @@ def _get_client() -> bigquery.Client:
     if _client is None:
         creds = service_account.Credentials.from_service_account_info(
             dict(st.secrets["gcp_service_account"]),
-            scopes=["https://www.googleapis.com/auth/bigquery.readonly"],
+            scopes=["https://www.googleapis.com/auth/bigquery"],
         )
         _client = bigquery.Client(credentials=creds, project=st.secrets["GCP_PROJECT"])
     return _client
