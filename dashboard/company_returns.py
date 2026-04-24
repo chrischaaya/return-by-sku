@@ -12,7 +12,7 @@ from engine.bigquery import get_filter_options, query_returns_data
 
 
 def _fmt_pct(v):
-    return f"{v:.1%}" if pd.notna(v) else "—"
+    return f"{v:.1%}" if pd.notna(v) and v > 0 else "—"
 
 
 def _fmt_num(v):
@@ -46,14 +46,18 @@ def _build_breakdown_table(df, group_col, group_label):
     df = df.sort_values("return_rate", ascending=False)
 
     # Grand total
+    total_sold = df["sold"].sum()
+    total_returned = df["returned"].sum()
+    total_gmv = df["gmv"].sum()
+    total_ret_amt = df["returned_amount"].sum()
     total = {
         group_col: "Grand total",
-        "returned": df["returned"].sum(),
-        "sold": df["sold"].sum(),
-        "return_rate": df["returned"].sum() / max(df["sold"].sum(), 1),
-        "returned_amount": df["returned_amount"].sum(),
-        "gmv": df["gmv"].sum(),
-        "pct_value_return": df["returned_amount"].sum() / max(df["gmv"].sum(), 1),
+        "returned": total_returned,
+        "sold": total_sold,
+        "return_rate": total_returned / max(total_sold, 1),
+        "returned_amount": total_ret_amt,
+        "gmv": total_gmv,
+        "pct_value_return": total_ret_amt / max(total_gmv, 1),
     }
 
     cols = [group_label, "Returned", "Delivered", "Return Rate", "Returned Amt", "GMV", "% Value of Return"]
@@ -95,44 +99,51 @@ def render(actor: str):
     # --- Filters ---
     options = get_filter_options()
 
-    fc1, fc2, fc3, fc4, fc5, fc6 = st.columns([1.2, 1, 1, 1, 1, 1])
-    with fc1:
-        date_range = st.date_input(
-            "Date range",
-            value=(date.today() - timedelta(days=90), date.today() - timedelta(days=7)),
+    # Row 1: dates + granularity
+    r1c1, r1c2, r1c3 = st.columns([0.7, 0.7, 0.8])
+    with r1c1:
+        start_date = st.date_input(
+            "From",
+            value=date.today() - timedelta(days=90),
             min_value=date(2024, 1, 1),
             max_value=date.today(),
+            key="cr_start",
         )
-    with fc2:
-        granularity = st.selectbox("Granularity", ["Weekly", "Daily", "Monthly"], index=0)
-    with fc3:
-        sel_channels = st.multiselect("Channel", options["channels"])
-    with fc4:
-        sel_suppliers = st.multiselect("Supplier", options["suppliers"])
-    with fc5:
-        sel_categories = st.multiselect("Category", options["categories"])
-    with fc6:
-        sku_input = st.text_input("SKU Prefix", placeholder="e.g. MBAJ1ZFU01")
+    with r1c2:
+        end_date = st.date_input(
+            "To",
+            value=date.today() - timedelta(days=7),
+            min_value=date(2024, 1, 1),
+            max_value=date.today(),
+            key="cr_end",
+        )
+    with r1c3:
+        granularity = st.selectbox("Granularity", ["Daily", "Weekly", "Monthly"], index=1, key="cr_gran")
 
-    # Parse date range
-    if isinstance(date_range, tuple) and len(date_range) == 2:
-        start_date, end_date = date_range
-    else:
-        start_date = date.today() - timedelta(days=90)
-        end_date = date.today() - timedelta(days=7)
+    # Row 2: filters
+    r2c1, r2c2, r2c3, r2c4 = st.columns(4)
+    with r2c1:
+        sel_channels = st.multiselect("Channel", options["channels"], key="cr_ch")
+    with r2c2:
+        sel_suppliers = st.multiselect("Supplier", options["suppliers"], key="cr_sup")
+    with r2c3:
+        sel_categories = st.multiselect("Category", options["categories"], key="cr_cat")
+    with r2c4:
+        sku_input = st.text_input("SKU Prefix", placeholder="e.g. MBAJ1ZFU01", key="cr_sku")
 
     # Parse SKU input (comma-separated)
     sku_prefixes = tuple(s.strip().upper() for s in sku_input.split(",") if s.strip()) if sku_input else ()
 
     # --- Query BigQuery ---
-    data = query_returns_data(
-        start_date=start_date.isoformat(),
-        end_date=end_date.isoformat(),
-        channels=tuple(sel_channels),
-        suppliers=tuple(sel_suppliers),
-        categories=tuple(sel_categories),
-        sku_prefixes=sku_prefixes,
-    )
+    with st.spinner("Loading data from BigQuery..."):
+        data = query_returns_data(
+            start_date=start_date.isoformat(),
+            end_date=end_date.isoformat(),
+            channels=tuple(sel_channels),
+            suppliers=tuple(sel_suppliers),
+            categories=tuple(sel_categories),
+            sku_prefixes=sku_prefixes,
+        )
 
     df_daily = data["daily"]
 
@@ -144,8 +155,6 @@ def render(actor: str):
     total_sold = int(df_daily["sold"].sum())
     total_returned = int(df_daily["returned"].sum())
     total_rate = total_returned / max(total_sold, 1)
-    total_gmv = df_daily["gmv"].sum()
-    total_ret_amt = df_daily["returned_amount"].sum()
 
     # Previous period comparison
     period_days = (end_date - start_date).days
@@ -226,7 +235,6 @@ def render(actor: str):
         customdata=list(zip(df_grouped["sold"].astype(int), df_grouped["returned"].astype(int))),
     ))
 
-    # Format x-axis labels based on granularity
     if granularity == "Monthly":
         tickformat = "%y-M%m"
     elif granularity == "Weekly":
