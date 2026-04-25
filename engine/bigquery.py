@@ -57,13 +57,20 @@ def get_filter_options() -> dict:
 def get_capture_curves() -> dict:
     """
     Compute return capture curves: per-channel AND a volume-weighted 'all' curve.
-    For each key, returns a dict of {days_since_order: cumulative_pct_captured}.
-    Based on orders 90+ days old so the full return picture is available.
+    - Recent 90-day window (orders 30-120 days ago) for current behavior
+    - Outliers excluded (returns filed after policy + 7d buffer)
+    - No post-hoc capping needed since outliers are filtered at query time
     """
     client = _get_client()
 
-    # Per-channel curves
-    q = """
+    # Build per-channel max days filter as SQL CASE
+    channel_cases = " ".join(
+        f"WHEN '{ch}' THEN {days}" for ch, days in CHANNEL_MAX_RETURN_DAYS.items()
+    )
+    max_days_sql = f"CASE o.sales_channel {channel_cases} ELSE {DEFAULT_MAX_RETURN_DAYS} END"
+
+    # Per-channel curves: recent 90d, outliers excluded
+    q = f"""
     WITH return_delays AS (
       SELECT
         o.sales_channel,
@@ -71,8 +78,10 @@ def get_capture_curves() -> dict:
       FROM `mongo_db.returns` r
       JOIN `mongo_db.orders` o ON r.order_id = o.order_id
       WHERE r.status != 'CANCELLED'
-        AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
+                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
+        AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) <= {max_days_sql}
     ),
     channel_totals AS (
       SELECT sales_channel, COUNT(*) as total_returns
@@ -98,31 +107,18 @@ def get_capture_curves() -> dict:
             curves[ch] = {}
         curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
 
-    # Cap each channel's curve at its max return window.
-    # At the cutoff day, whatever % is captured becomes 100% (the rest is noise).
-    for ch, curve in curves.items():
-        max_days = CHANNEL_MAX_RETURN_DAYS.get(ch, DEFAULT_MAX_RETURN_DAYS)
-        # Find capture % at the cutoff day
-        matching = [d for d in curve.keys() if d <= max_days]
-        if matching:
-            cap_pct = curve[max(matching)]
-        else:
-            cap_pct = 1.0
-        # Rescale: divide all values by cap_pct so the cutoff day = 1.0
-        if cap_pct > 0 and cap_pct < 1.0:
-            for day in curve:
-                curve[day] = min(curve[day] / cap_pct, 1.0)
-
-    # Blended "all" curve — volume-weighted across all channels
-    q_all = """
+    # Blended "all" curve: recent 90d, outliers excluded per channel
+    q_all = f"""
     WITH return_delays AS (
       SELECT
         DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) as days_to_return
       FROM `mongo_db.returns` r
       JOIN `mongo_db.orders` o ON r.order_id = o.order_id
       WHERE r.status != 'CANCELLED'
-        AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
+                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
+        AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) <= {max_days_sql}
     ),
     total AS (SELECT COUNT(*) as t FROM return_delays)
     SELECT
@@ -138,15 +134,6 @@ def get_capture_curves() -> dict:
     curves["_all"] = {}
     for row in all_rows:
         curves["_all"][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
-
-    # Cap blended curve at the max across all channels (114d for aboutYou)
-    max_all = max(CHANNEL_MAX_RETURN_DAYS.values())
-    matching = [d for d in curves["_all"].keys() if d <= max_all]
-    if matching:
-        cap_pct = curves["_all"][max(matching)]
-        if cap_pct > 0 and cap_pct < 1.0:
-            for day in curves["_all"]:
-                curves["_all"][day] = min(curves["_all"][day] / cap_pct, 1.0)
 
     return curves
 
