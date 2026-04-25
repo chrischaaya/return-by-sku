@@ -77,8 +77,16 @@ def _hybrid_estimate(row, hist_avg: float, benchmarks: dict, channels: list) -> 
     # Strategy 2: historical benchmark
     hist_estimate = sold * hist_avg
 
-    # Blend based on capture level
-    if capture >= 0.70:
+    # Anomaly detection: if curve says "nearly captured" but rate is way below
+    # historical minimum, the curve is misleading (data pipeline issue).
+    # Fall back to historical benchmark.
+    p5, p95 = _get_benchmark_bounds(benchmarks, channels)
+    curve_rate = curve_estimate / sold if sold > 0 else 0
+    if capture >= 0.70 and curve_rate < p5 * 0.7:
+        # Curve says data is nearly complete but rate is impossibly low
+        # → data pipeline issue, use historical instead
+        estimated = hist_estimate
+    elif capture >= 0.70:
         estimated = curve_estimate
     elif capture < 0.50:
         estimated = hist_estimate
@@ -88,7 +96,6 @@ def _hybrid_estimate(row, hist_avg: float, benchmarks: dict, channels: list) -> 
         estimated = blend * curve_estimate + (1 - blend) * hist_estimate
 
     # Guardrails
-    _, p95 = _get_benchmark_bounds(benchmarks, channels)
     max_by_p95 = sold * min(p95 * 1.1, 1.0)  # P95 + 10% tolerance
     estimated = min(estimated, max_by_p95)
     estimated = max(estimated, actual)  # Never less than actual
