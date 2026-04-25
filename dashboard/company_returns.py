@@ -252,7 +252,7 @@ def render(actor: str):
     # Compute estimated return rates using capture curves
     capture_curves = get_capture_curves()
     active_channels = list(sel_channels) if sel_channels else list(capture_curves.keys())
-    today = pd.Timestamp.now(tz="UTC").normalize()
+    today = pd.Timestamp.now().normalize()
 
     df_grouped["days_old"] = (today - df_grouped["period"]).dt.days
     df_grouped["capture_pct"] = df_grouped["days_old"].apply(
