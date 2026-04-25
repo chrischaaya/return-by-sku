@@ -10,6 +10,31 @@ import streamlit as st
 
 from engine.bigquery import get_filter_options, query_returns_data, get_capture_curves, get_capture_pct
 
+# Per-channel reliability cutoff: official return window + 14 days buffer
+# Data older than this is considered fully reliable regardless of capture %
+CHANNEL_RELIABILITY_DAYS = {
+    "trendyol": 30,
+    "trendyolRO": 30,
+    "hepsiburada": 30,
+    "namshi": 28,
+    "hiccup": 28,
+    "debenhams": 42,
+    "fashiondays": 44,
+    "fashiondaysBG": 44,
+    "emag": 44,
+    "tiktokShop": 44,
+    "aboutYou": 114,
+}
+DEFAULT_RELIABILITY_DAYS = 44  # fallback for unknown channels
+
+
+def _get_reliability_days(channels: list) -> int:
+    """Get the reliability cutoff for the selected channels.
+    Uses the MAX across selected channels (most conservative)."""
+    if not channels:
+        return max(CHANNEL_RELIABILITY_DAYS.values())
+    return max(CHANNEL_RELIABILITY_DAYS.get(ch, DEFAULT_RELIABILITY_DAYS) for ch in channels)
+
 
 def _fmt_pct(v):
     return f"{v:.1%}" if pd.notna(v) and v > 0 else "—"
@@ -314,7 +339,8 @@ def render(actor: str):
             lambda d: get_capture_pct(capture_curves, active_channels, d)
         )
 
-    reliable_mask = (df_grouped["capture_pct"] >= 0.95) | (df_grouped["days_old"] >= 60)
+    reliability_days = _get_reliability_days(list(sel_channels))
+    reliable_mask = (df_grouped["capture_pct"] >= 0.95) | (df_grouped["days_old"] >= reliability_days)
 
     fig = go.Figure()
 
