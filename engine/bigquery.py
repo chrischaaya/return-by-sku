@@ -116,6 +116,21 @@ def get_capture_curves() -> dict:
     return curves
 
 
+@st.cache_data(ttl=86400)
+def get_channel_volumes() -> dict:
+    """Get return volume per channel for weighting capture curves."""
+    client = _get_client()
+    q = """
+    SELECT o.sales_channel, COUNT(*) as returns
+    FROM `mongo_db.returns` r
+    JOIN `mongo_db.orders` o ON r.order_id = o.order_id
+    WHERE r.status != 'CANCELLED'
+      AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+    GROUP BY 1
+    """
+    return {row.sales_channel: row.returns for row in client.query(q).result()}
+
+
 def _lookup_curve(curve: dict, days_old: int) -> float:
     """Look up cumulative capture % from a curve dict."""
     if not curve:
@@ -127,14 +142,31 @@ def _lookup_curve(curve: dict, days_old: int) -> float:
 def get_capture_pct(curves: dict, channels: list, days_old: int) -> float:
     """
     Get the expected capture % for a given number of days since order.
-    Uses channel-specific curve if exactly one channel selected,
-    otherwise uses the volume-weighted blended curve.
+    - 0 or all channels: use the pre-computed volume-weighted '_all' curve
+    - 1 channel: use that channel's specific curve
+    - 2+ channels: compute weighted average of those channels' curves by return volume
     """
+    all_channels = [c for c in curves.keys() if c != "_all"]
+
+    if not channels or set(channels) == set(all_channels):
+        return _lookup_curve(curves.get("_all", {}), days_old)
+
     if len(channels) == 1 and channels[0] in curves:
         return _lookup_curve(curves[channels[0]], days_old)
 
-    # Multiple or no channels: use the blended curve
-    return _lookup_curve(curves.get("_all", {}), days_old)
+    # Multiple specific channels: weighted average by return volume
+    volumes = get_channel_volumes()
+    total_vol = sum(volumes.get(ch, 0) for ch in channels)
+    if total_vol == 0:
+        return _lookup_curve(curves.get("_all", {}), days_old)
+
+    weighted_pct = 0.0
+    for ch in channels:
+        vol = volumes.get(ch, 0)
+        pct = _lookup_curve(curves.get(ch, {}), days_old)
+        weighted_pct += pct * (vol / total_vol)
+
+    return weighted_pct
 
 
 @st.cache_data(ttl=3600)
