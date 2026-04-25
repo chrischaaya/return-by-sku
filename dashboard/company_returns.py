@@ -316,24 +316,26 @@ def render(actor: str):
         )),
     ))
 
-    # Dotted line: estimated return rate (only where it diverges from actual)
-    if has_estimated:
-        # Only show points where estimated differs from actual by > 1pp
-        diverged_mask = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
-        est_df = df_grouped[~reliable_mask & diverged_mask]
-        # Include the last non-diverged point for line continuity
-        last_reliable = df_grouped[reliable_mask | ~diverged_mask].tail(1)
-        if not last_reliable.empty:
-            est_df = pd.concat([last_reliable, est_df])
+    # Dotted line: estimated return rate
+    # Only show where: capture < 95% AND capture >= 25% AND estimate diverges > 1pp
+    # Below 25% capture the estimate is too unreliable
+    est_eligible = (~reliable_mask) & (df_grouped["capture_pct"] >= 0.25)
+    diverged = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
+    est_show = est_eligible & diverged
+
+    if est_show.any():
+        est_df = df_grouped[est_show].copy()
+        # Include last point before divergence for line continuity
+        first_est_idx = est_df.index[0]
+        if first_est_idx > 0:
+            bridge = df_grouped.loc[[first_est_idx - 1]]
+            est_df = pd.concat([bridge, est_df])
 
         fig.add_trace(go.Scatter(
             x=est_df["period"],
             y=est_df["estimated_rate"],
-            mode="lines+markers+text",
+            mode="lines+markers",
             name="Estimated",
-            text=[f"{v:.1%}" for v in est_df["estimated_rate"]],
-            textposition="bottom center",
-            textfont=dict(size=9, color="#f59e0b"),
             line=dict(color="#f59e0b", width=2, dash="dot"),
             marker=dict(size=5, color="#f59e0b"),
             hovertemplate="%{x|%d %b %Y}<br>Estimated: %{y:.1%}<br>Capture: %{customdata:.0%}<extra></extra>",
@@ -347,9 +349,10 @@ def render(actor: str):
     else:
         tickformat = "%d %b"
 
+    # Y-axis: use only reliable rates + eligible estimates for scaling
     all_rates = df_grouped["return_rate"].tolist()
-    if has_estimated:
-        all_rates += df_grouped["estimated_rate"].tolist()
+    if est_show.any():
+        all_rates += df_grouped.loc[est_show, "estimated_rate"].tolist()
     y_max = max(max(all_rates) + 0.05, 0.10) if all_rates else 0.5
     fig.update_layout(
         title="Historic Return Rate",
