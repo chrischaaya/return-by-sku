@@ -249,13 +249,11 @@ def render(actor: str):
         sel_categories = st.multiselect("Category", options["categories"], key="cr_cat")
     with r2c4:
         # Filter subcategories based on selected categories
+        pairs = options.get("cat_sub_pairs", [])
         if sel_categories:
-            available_subs = sorted(set(
-                sub for cat in sel_categories
-                for sub in options.get("cat_sub_map", {}).get(cat, [])
-            ))
+            available_subs = sorted(set(sub for cat, sub in pairs if cat in sel_categories))
         else:
-            available_subs = options["subcategories"]
+            available_subs = sorted(set(sub for _, sub in pairs))
         sel_subcategories = st.multiselect("Subcategory", available_subs, key="cr_subcat")
     with r2c5:
         sku_input = st.text_input("SKU Prefix", placeholder="e.g. MBAJ1ZFU01", key="cr_sku")
