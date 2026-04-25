@@ -90,8 +90,7 @@ def _hybrid_estimate(row, hist_avg: float, benchmarks: dict, channels: list) -> 
     # Guardrails
     _, p95 = _get_benchmark_bounds(benchmarks, channels)
     max_by_p95 = sold * min(p95 * 1.1, 1.0)  # P95 + 10% tolerance
-    max_by_inflation = actual * 2.5  # Never inflate more than 2.5x
-    estimated = min(estimated, max_by_p95, max_by_inflation)
+    estimated = min(estimated, max_by_p95)
     estimated = max(estimated, actual)  # Never less than actual
 
     return estimated

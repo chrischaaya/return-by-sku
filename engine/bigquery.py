@@ -95,8 +95,8 @@ def get_capture_curves() -> dict:
       FROM `mongo_db.returns` r
       JOIN `mongo_db.orders` o ON r.order_id = o.order_id
       WHERE r.status != 'CANCELLED'
-        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
-                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 240 DAY)
+                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) <= {max_days_sql}
     ),
@@ -132,8 +132,8 @@ def get_capture_curves() -> dict:
       FROM `mongo_db.returns` r
       JOIN `mongo_db.orders` o ON r.order_id = o.order_id
       WHERE r.status != 'CANCELLED'
-        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
-                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 240 DAY)
+                                      AND DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
         AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) <= {max_days_sql}
     ),
@@ -164,8 +164,8 @@ def get_channel_volumes() -> dict:
     FROM `mongo_db.returns` r
     JOIN `mongo_db.orders` o ON r.order_id = o.order_id
     WHERE r.status != 'CANCELLED'
-      AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
-                                    AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+      AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 240 DAY)
+                                    AND DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
     GROUP BY 1
     """
     return {row.sales_channel: row.returns for row in client.query(q).result()}
@@ -189,15 +189,15 @@ def get_channel_benchmarks() -> dict:
       FROM (
         SELECT order_date, sku_prefix, size, sales_channel, SUM(sold) as sold
         FROM `returns_analytics.daily_orders`
-        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
-                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 240 DAY)
+                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
         GROUP BY 1, 2, 3, 4
       ) o
       LEFT JOIN (
         SELECT order_date, sku_prefix, size, sales_channel, SUM(returned) as returned
         FROM `returns_analytics.daily_returns`
-        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
-                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 240 DAY)
+                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
         GROUP BY 1, 2, 3, 4
       ) r ON o.order_date = r.order_date AND o.sku_prefix = r.sku_prefix
          AND o.size = r.size AND o.sales_channel = r.sales_channel
