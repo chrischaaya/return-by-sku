@@ -301,19 +301,20 @@ def render(actor: str):
     else:
         df_grouped["label"] = df_grouped["period"].dt.strftime("%d %b")
 
-    # Capture pct derived from actual vs estimated (per-channel adjusted at daily level)
+    # Determine reliability: data older than 60 days is always reliable
+    # For newer data, use actual vs estimated ratio
+    df_grouped["days_old"] = (today_ts - df_grouped["period_end"]).dt.days.clip(lower=0)
     df_grouped["capture_pct"] = (
         df_grouped["returned"] / df_grouped["estimated_returned"].replace(0, 1)
     ).clip(0, 1)
-    # Where no returns at all, use period age to determine reliability
+    # Where no returns at all, use period age
     no_returns = df_grouped["returned"] == 0
     if no_returns.any():
-        df_grouped.loc[no_returns, "days_old"] = (today_ts - df_grouped.loc[no_returns, "period_end"]).dt.days.clip(lower=0)
         df_grouped.loc[no_returns, "capture_pct"] = df_grouped.loc[no_returns, "days_old"].apply(
             lambda d: get_capture_pct(capture_curves, active_channels, d)
         )
 
-    reliable_mask = df_grouped["capture_pct"] >= 0.95
+    reliable_mask = (df_grouped["capture_pct"] >= 0.95) | (df_grouped["days_old"] >= 60)
 
     fig = go.Figure()
 
