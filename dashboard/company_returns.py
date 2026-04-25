@@ -466,7 +466,7 @@ def render(actor: str):
 
     # Dotted line: estimated return rate (per-period, independent of KPI show_forecast)
     # Show if: period is not reliable, estimate diverges > 1pp, AND period has enough data
-    est_eligible = has_enough_data & (~reliable_mask) & (df_grouped["sold"] >= 50)
+    est_eligible = has_enough_data & (~reliable_mask) & (df_grouped["sold"] >= 50) & (df_grouped["capture_pct"] >= 0.70)
     diverged = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
     est_show = est_eligible & diverged
 
