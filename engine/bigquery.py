@@ -42,15 +42,23 @@ def get_filter_options() -> dict:
         "SELECT DISTINCT sales_channel FROM `returns_analytics.daily_orders` WHERE sales_channel IS NOT NULL ORDER BY sales_channel"
     ).result()]
 
-    suppliers = [r.supplier_name for r in client.query(
+    # Suppliers: merchants first, then others, both alphabetical
+    all_suppliers = [r.supplier_name for r in client.query(
         "SELECT DISTINCT supplier_name FROM `returns_analytics.products` WHERE supplier_name IS NOT NULL ORDER BY supplier_name"
     ).result()]
+    merchants = sorted([s for s in all_suppliers if "merchant" in s.lower()])
+    non_merchants = sorted([s for s in all_suppliers if "merchant" not in s.lower()])
+    suppliers = merchants + non_merchants
 
-    categories = [r.category_l2 for r in client.query(
-        "SELECT DISTINCT category_l2 FROM `returns_analytics.products` WHERE category_l2 IS NOT NULL ORDER BY category_l2"
+    categories = [r.category_l3 for r in client.query(
+        "SELECT DISTINCT category_l3 FROM `returns_analytics.products` WHERE category_l3 IS NOT NULL ORDER BY category_l3"
     ).result()]
 
-    return {"channels": channels, "suppliers": suppliers, "categories": categories}
+    subcategories = [r.category_l4 for r in client.query(
+        "SELECT DISTINCT category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l4"
+    ).result()]
+
+    return {"channels": channels, "suppliers": suppliers, "categories": categories, "subcategories": subcategories}
 
 
 @st.cache_data(ttl=86400)
@@ -252,6 +260,7 @@ def query_returns_data(
     channels: tuple = (),
     suppliers: tuple = (),
     categories: tuple = (),
+    subcategories: tuple = (),
     sku_prefixes: tuple = (),
 ) -> dict:
     """
@@ -276,8 +285,12 @@ def query_returns_data(
         params.append(bigquery.ArrayQueryParameter("suppliers", "STRING", list(suppliers)))
 
     if categories:
-        filters.append("p.category_l2 IN UNNEST(@categories)")
+        filters.append("p.category_l3 IN UNNEST(@categories)")
         params.append(bigquery.ArrayQueryParameter("categories", "STRING", list(categories)))
+
+    if subcategories:
+        filters.append("p.category_l4 IN UNNEST(@subcategories)")
+        params.append(bigquery.ArrayQueryParameter("subcategories", "STRING", list(subcategories)))
 
     if sku_prefixes:
         sku_conditions = []
@@ -301,7 +314,8 @@ def query_returns_data(
         o.sold,
         o.gmv,
         p.supplier_name,
-        p.category_l2
+        p.category_l3,
+        p.category_l4
       FROM `returns_analytics.daily_orders` o
       LEFT JOIN `returns_analytics.products` p ON o.sku_prefix = p.sku_prefix
       WHERE {where_clause}
@@ -359,7 +373,7 @@ def query_returns_data(
     # 3. By category
     q_category = base_cte + """
     SELECT
-      COALESCE(fo.category_l2, 'Unknown') AS category,
+      COALESCE(fo.category_l3, 'Unknown') AS category,
       SUM(fo.sold) AS sold,
       SUM(fo.gmv) AS gmv,
       COALESCE(SUM(fr.returned), 0) AS returned,
