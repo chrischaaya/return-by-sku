@@ -299,6 +299,12 @@ def render(actor: str):
     # Confidence check: suppress forecast if insufficient data
     # Need at least 200 total sold in the range AND at least 50 returned
     has_enough_data = total_sold >= 200 and total_returned >= 50
+    # For daily view, suppress forecast if average daily volume < 50 orders
+    if granularity == "Daily":
+        num_days = max((end_date - start_date).days, 1)
+        avg_daily_sold = total_sold / num_days
+        if avg_daily_sold < 50:
+            has_enough_data = False
     total_estimated_returned = int(df_daily["estimated_returned"].sum()) if has_enough_data else total_returned
     estimated_rate = total_estimated_returned / max(total_sold, 1)
     show_forecast = has_enough_data and abs(estimated_rate - total_rate) > 0.005
