@@ -256,7 +256,7 @@ def render(actor: str):
         sku_input = st.text_input("SKU Prefix", placeholder="e.g. MBAJ1ZFU01", key="cr_sku")
 
     # Parse SKU input (comma-separated)
-    sku_prefixes = tuple(s.strip().upper() for s in sku_input.split(",") if s.strip()) if sku_input else ()
+    sku_prefixes = tuple(s.replace(" ", "").upper() for s in sku_input.split(",") if s.strip()) if sku_input else ()
 
     # --- Query BigQuery ---
     with st.spinner("Loading data from BigQuery..."):
