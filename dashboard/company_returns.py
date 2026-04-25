@@ -244,6 +244,10 @@ def render(actor: str):
     ).reset_index()
     df_grouped["return_rate"] = df_grouped["returned"] / df_grouped["sold"].replace(0, 1)
 
+    # Clip x-axis to selected date range
+    x_min = pd.Timestamp(start_date)
+    x_max = pd.Timestamp(end_date)
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=df_grouped["period"],
@@ -269,7 +273,7 @@ def render(actor: str):
     fig.update_layout(
         title="Historic Return Rate",
         yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
-        xaxis=dict(title="", gridcolor="#f0f0f0", tickformat=tickformat),
+        xaxis=dict(title="", gridcolor="#f0f0f0", tickformat=tickformat, range=[x_min, x_max]),
         height=420, margin=dict(t=40, b=40, l=50, r=20),
         plot_bgcolor="white", hovermode="x unified",
     )
