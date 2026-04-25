@@ -144,6 +144,16 @@ def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
 def render(actor: str):
     """Render the Company Returns tab."""
 
+    st.markdown("""<style>
+    .delta-tip { position: relative; }
+    .delta-tooltip {
+        display: none; position: absolute; bottom: 130%; left: 50%; transform: translateX(-50%);
+        background: #1a1a1a; color: white; padding: 8px 12px; border-radius: 6px;
+        font-size: 12px; white-space: nowrap; z-index: 1000; line-height: 1.6;
+    }
+    .delta-tip:hover .delta-tooltip { display: block; }
+    </style>""", unsafe_allow_html=True)
+
     # --- Filters ---
     options = get_filter_options()
 
@@ -250,8 +260,14 @@ def render(actor: str):
     if delta_str:
         prev_start_str = prev_start.strftime("%d %b")
         prev_end_str = prev_end.strftime("%d %b %Y")
-        tooltip = f"Previous period: {prev_start_str} – {prev_end_str}&#10;Sold: {prev_sold:,} · Returned: {prev_returned:,} · Rate: {_fmt_pct(prev_rate)}"
-        rate_html = f'{rate_str} <span style="font-size:14px; color:{delta_color}; margin-left:4px; cursor:help;" title="{tooltip}">({delta_str})</span>'
+        tooltip_text = f"{prev_start_str} – {prev_end_str}<br>Sold: {prev_sold:,} · Returned: {prev_returned:,}<br>Rate: {_fmt_pct(prev_rate)}"
+        rate_html = (
+            f'{rate_str} '
+            f'<span style="position:relative; font-size:14px; color:{delta_color}; margin-left:4px; cursor:help;" class="delta-tip">'
+            f'({delta_str})'
+            f'<span class="delta-tooltip">{tooltip_text}</span>'
+            f'</span>'
+        )
     else:
         rate_html = rate_str
 
