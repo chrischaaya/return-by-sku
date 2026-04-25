@@ -352,12 +352,14 @@ def render(actor: str):
     else:
         rate_html = rate_str
 
-    # KPI cards
+    # KPI cards — always show 4 columns
+    k1, k2, k3, k4 = st.columns(4)
     if show_forecast:
         est_rate_str = _fmt_pct(estimated_rate)
-        k1, k2, k3, k4 = st.columns(4)
+        est_color = "#f59e0b"
     else:
-        k1, k2, k3 = st.columns(3)
+        est_rate_str = "No reliable data"
+        est_color = "#aaa"
 
     for col, label, value in [
         (k1, "Total Sold", _fmt_num(total_sold)),
@@ -379,15 +381,14 @@ def render(actor: str):
             f'</div>',
             unsafe_allow_html=True,
         )
-    if show_forecast:
-        with k4:
-            st.markdown(
-                f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
-                f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Estimated Return Rate</div>'
-                f'<div style="font-size:28px; font-weight:700; margin-top:4px; color:#f59e0b;">{est_rate_str}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
+    with k4:
+        st.markdown(
+            f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
+            f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Estimated Return Rate</div>'
+            f'<div style="font-size:{"28" if show_forecast else "14"}px; font-weight:700; margin-top:4px; color:{est_color};">{est_rate_str}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
     st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
 

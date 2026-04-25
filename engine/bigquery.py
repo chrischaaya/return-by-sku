@@ -118,19 +118,11 @@ def get_capture_curves() -> dict:
     rows = list(client.query(q).result())
 
     curves = {}
-    channel_sample_sizes = {}
     for row in rows:
         ch = row.sales_channel
         if ch not in curves:
-            curves[ch] = {}
-            channel_sample_sizes[ch] = row.total_returns
+            curves[ch] = {"_samples": row.total_returns}
         curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
-
-    # Discard curves with too few data points (< 100 returns) — unreliable
-    MIN_CURVE_SAMPLES = 100
-    for ch in list(curves.keys()):
-        if channel_sample_sizes.get(ch, 0) < MIN_CURVE_SAMPLES:
-            del curves[ch]
 
     # Blended "all" curve: recent 90d, outliers excluded per channel
     q_all = f"""
@@ -232,11 +224,17 @@ def get_channel_benchmarks() -> dict:
     }
 
 
+MIN_CURVE_SAMPLES = 100
+
+
 def _lookup_curve(curve: dict, days_old: int) -> float:
     """Look up cumulative capture % from a curve dict."""
     if not curve:
         return 1.0
-    matching = [d for d in curve.keys() if d <= days_old]
+    # If curve has too few samples, treat as fully captured (no forecast)
+    if curve.get("_samples", MIN_CURVE_SAMPLES) < MIN_CURVE_SAMPLES:
+        return 1.0
+    matching = [d for d in curve.keys() if isinstance(d, int) and d <= days_old]
     return curve[max(matching)] if matching else 0.0
 
 
