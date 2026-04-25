@@ -179,6 +179,23 @@ def render(actor: str):
     total_returned = int(df_daily["returned"].sum())
     total_rate = total_returned / max(total_sold, 1)
 
+    # Compute estimated overall rate using capture curves
+    capture_curves = get_capture_curves()
+    active_channels = list(sel_channels) if sel_channels else list(capture_curves.keys())
+    today_ts = pd.Timestamp.now().normalize()
+
+    df_daily["order_date"] = pd.to_datetime(df_daily["order_date"])
+    df_daily["days_old"] = (today_ts - df_daily["order_date"]).dt.days
+    df_daily["capture_pct"] = df_daily["days_old"].apply(
+        lambda d: get_capture_pct(capture_curves, active_channels, d)
+    )
+    # Estimated returned = actual returned adjusted by capture curve
+    df_daily["estimated_returned"] = (
+        df_daily["returned"] / df_daily["capture_pct"].replace(0, 1)
+    )
+    total_estimated_returned = int(df_daily["estimated_returned"].sum())
+    estimated_rate = total_estimated_returned / max(total_sold, 1)
+
     # Previous period comparison
     period_days = (end_date - start_date).days
     prev_start = start_date - timedelta(days=period_days)
@@ -200,14 +217,23 @@ def render(actor: str):
         delta_str = f"{delta_pp:+.1f}pp"
         delta_color = "#ef4444" if delta_pp > 0 else "#22c55e" if delta_pp < 0 else "#888"
     else:
-        delta_str = "—"
+        delta_str = ""
         delta_color = "#888"
+
+    # Return rate card with vs previous period inline
+    rate_str = _fmt_pct(total_rate)
+    if delta_str:
+        rate_html = f'{rate_str} <span style="font-size:14px; color:{delta_color}; margin-left:4px;">({delta_str})</span>'
+    else:
+        rate_html = rate_str
+
+    # Estimated rate card
+    est_rate_str = _fmt_pct(estimated_rate)
 
     k1, k2, k3, k4 = st.columns(4)
     for col, label, value in [
         (k1, "Total Sold", _fmt_num(total_sold)),
         (k2, "Total Returned", _fmt_num(total_returned)),
-        (k3, "Return Rate", _fmt_pct(total_rate)),
     ]:
         with col:
             st.markdown(
@@ -217,11 +243,19 @@ def render(actor: str):
                 f'</div>',
                 unsafe_allow_html=True,
             )
+    with k3:
+        st.markdown(
+            f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
+            f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Return Rate</div>'
+            f'<div style="font-size:28px; font-weight:700; margin-top:4px;">{rate_html}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
     with k4:
         st.markdown(
             f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
-            f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">vs Previous Period</div>'
-            f'<div style="font-size:28px; font-weight:700; margin-top:4px; color:{delta_color};">{delta_str}</div>'
+            f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Estimated Return Rate</div>'
+            f'<div style="font-size:28px; font-weight:700; margin-top:4px; color:#f59e0b;">{est_rate_str}</div>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -229,7 +263,7 @@ def render(actor: str):
     st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
 
     # --- Time series graph ---
-    df_daily["order_date"] = pd.to_datetime(df_daily["order_date"])
+    # order_date already converted to datetime and has capture_pct from KPI section
 
     if granularity == "Weekly":
         df_daily["period"] = df_daily["order_date"].dt.to_period("W").apply(lambda p: p.start_time)
@@ -240,27 +274,22 @@ def render(actor: str):
 
     df_grouped = df_daily.groupby("period").agg(
         sold=("sold", "sum"), returned=("returned", "sum"),
+        estimated_returned=("estimated_returned", "sum"),
         gmv=("gmv", "sum"), returned_amount=("returned_amount", "sum"),
     ).reset_index()
     df_grouped["return_rate"] = df_grouped["returned"] / df_grouped["sold"].replace(0, 1)
+    df_grouped["estimated_rate"] = (df_grouped["estimated_returned"] / df_grouped["sold"].replace(0, 1)).clip(upper=1.0)
 
     # Filter out periods that fall entirely outside the selected range
     x_min = pd.Timestamp(start_date)
     x_max = pd.Timestamp(end_date)
     df_grouped = df_grouped[(df_grouped["period"] >= x_min - pd.Timedelta(days=7)) & (df_grouped["period"] <= x_max)]
 
-    # Compute estimated return rates using capture curves
-    capture_curves = get_capture_curves()
-    active_channels = list(sel_channels) if sel_channels else list(capture_curves.keys())
-    today = pd.Timestamp.now().normalize()
-
-    df_grouped["days_old"] = (today - df_grouped["period"]).dt.days
+    # Compute per-period capture pct for the divergence check
+    df_grouped["days_old"] = (today_ts - df_grouped["period"]).dt.days
     df_grouped["capture_pct"] = df_grouped["days_old"].apply(
         lambda d: get_capture_pct(capture_curves, active_channels, d)
     )
-    df_grouped["estimated_rate"] = (
-        df_grouped["return_rate"] / df_grouped["capture_pct"].replace(0, 1)
-    ).clip(upper=1.0)
 
     # Split into reliable (capture >= 95%) and estimated (capture < 95%)
     reliable_mask = df_grouped["capture_pct"] >= 0.95
