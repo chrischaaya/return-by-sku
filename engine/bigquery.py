@@ -8,6 +8,17 @@ import streamlit as st
 from google.cloud import bigquery
 from google.oauth2 import service_account
 
+# Per-channel max return window + 14d buffer.
+# Capture curves are capped at this — anything after is noise, not real pending returns.
+CHANNEL_MAX_RETURN_DAYS = {
+    "trendyol": 30, "trendyolRO": 30, "hepsiburada": 30,
+    "namshi": 28, "hiccup": 28,
+    "debenhams": 42,
+    "fashiondays": 44, "fashiondaysBG": 44, "emag": 44, "tiktokShop": 44,
+    "aboutYou": 114,
+}
+DEFAULT_MAX_RETURN_DAYS = 44
+
 _client = None
 
 
@@ -87,6 +98,21 @@ def get_capture_curves() -> dict:
             curves[ch] = {}
         curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
 
+    # Cap each channel's curve at its max return window.
+    # At the cutoff day, whatever % is captured becomes 100% (the rest is noise).
+    for ch, curve in curves.items():
+        max_days = CHANNEL_MAX_RETURN_DAYS.get(ch, DEFAULT_MAX_RETURN_DAYS)
+        # Find capture % at the cutoff day
+        matching = [d for d in curve.keys() if d <= max_days]
+        if matching:
+            cap_pct = curve[max(matching)]
+        else:
+            cap_pct = 1.0
+        # Rescale: divide all values by cap_pct so the cutoff day = 1.0
+        if cap_pct > 0 and cap_pct < 1.0:
+            for day in curve:
+                curve[day] = min(curve[day] / cap_pct, 1.0)
+
     # Blended "all" curve — volume-weighted across all channels
     q_all = """
     WITH return_delays AS (
@@ -112,6 +138,15 @@ def get_capture_curves() -> dict:
     curves["_all"] = {}
     for row in all_rows:
         curves["_all"][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
+
+    # Cap blended curve at the max across all channels (114d for aboutYou)
+    max_all = max(CHANNEL_MAX_RETURN_DAYS.values())
+    matching = [d for d in curves["_all"].keys() if d <= max_all]
+    if matching:
+        cap_pct = curves["_all"][max(matching)]
+        if cap_pct > 0 and cap_pct < 1.0:
+            for day in curves["_all"]:
+                curves["_all"][day] = min(curves["_all"][day] / cap_pct, 1.0)
 
     return curves
 
