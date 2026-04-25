@@ -253,6 +253,81 @@ def get_capture_pct(curves: dict, channels: list, days_old: int) -> float:
     return weighted_pct
 
 
+# --- Action Tracking queries (per-SKU time series) ---
+
+@st.cache_data(ttl=3600)
+def get_tracking_daily_orders(sku_prefix: str, start_date: str, end_date: str) -> list:
+    """Daily order counts per size for a single SKU. Replaces pipelines.get_daily_orders_for_sku()."""
+    client = _get_client()
+    q = """
+    SELECT order_date as date, size, SUM(sold) as sold
+    FROM `returns_analytics.daily_orders`
+    WHERE sku_prefix = @sku AND order_date BETWEEN @start AND @end
+    GROUP BY 1, 2
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("sku", "STRING", sku_prefix),
+        bigquery.ScalarQueryParameter("start", "DATE", start_date),
+        bigquery.ScalarQueryParameter("end", "DATE", end_date),
+    ])
+    rows = client.query(q, job_config=job_config).result()
+    return [{"date": str(r.date), "size": r.size, "sold": r.sold} for r in rows]
+
+
+@st.cache_data(ttl=3600)
+def get_tracking_daily_returns(sku_prefix: str, start_date: str, end_date: str) -> list:
+    """Daily return counts per size for a single SKU, grouped by order date.
+    Replaces pipelines.get_daily_returns_for_sku() — no $lookup needed."""
+    client = _get_client()
+    q = """
+    SELECT order_date as date, size, SUM(returned) as returned
+    FROM `returns_analytics.daily_returns`
+    WHERE sku_prefix = @sku AND order_date BETWEEN @start AND @end
+    GROUP BY 1, 2
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ScalarQueryParameter("sku", "STRING", sku_prefix),
+        bigquery.ScalarQueryParameter("start", "DATE", start_date),
+        bigquery.ScalarQueryParameter("end", "DATE", end_date),
+    ])
+    rows = client.query(q, job_config=job_config).result()
+    return [{"date": str(r.date), "size": r.size, "returned": r.returned} for r in rows]
+
+
+@st.cache_data(ttl=3600)
+def get_tracking_counts(sku_prefixes: tuple, start_date: str, end_date: str) -> dict:
+    """Total sold and returned per SKU in a date range.
+    Replaces pipelines.get_orders_count_for_skus() + get_returns_count_for_skus()."""
+    if not sku_prefixes:
+        return {}
+    client = _get_client()
+    q = """
+    SELECT
+      o.sku_prefix,
+      SUM(o.sold) as sold,
+      COALESCE(SUM(r.returned), 0) as returned
+    FROM (
+      SELECT sku_prefix, SUM(sold) as sold
+      FROM `returns_analytics.daily_orders`
+      WHERE sku_prefix IN UNNEST(@skus) AND order_date BETWEEN @start AND @end
+      GROUP BY 1
+    ) o
+    LEFT JOIN (
+      SELECT sku_prefix, SUM(returned) as returned
+      FROM `returns_analytics.daily_returns`
+      WHERE sku_prefix IN UNNEST(@skus) AND order_date BETWEEN @start AND @end
+      GROUP BY 1
+    ) r ON o.sku_prefix = r.sku_prefix
+    """
+    job_config = bigquery.QueryJobConfig(query_parameters=[
+        bigquery.ArrayQueryParameter("skus", "STRING", list(sku_prefixes)),
+        bigquery.ScalarQueryParameter("start", "DATE", start_date),
+        bigquery.ScalarQueryParameter("end", "DATE", end_date),
+    ])
+    return {r.sku_prefix: {"sold": r.sold, "returned": r.returned}
+            for r in client.query(q, job_config=job_config).result()}
+
+
 @st.cache_data(ttl=3600)
 def query_returns_data(
     start_date: str,

@@ -20,6 +20,7 @@ def get_tracking_summaries(cache_key: str, sku_action_pairs_json: str) -> dict:
     Uses simple count queries (~0.5s total) instead of daily aggregations (~7s).
     Returns {sku_prefix: {last_14d, pre_po, change_pp, po_info, badge}}.
     """
+    from engine.bigquery import get_tracking_counts
     import json
     pairs = json.loads(sku_action_pairs_json)
     if not pairs:
@@ -31,21 +32,23 @@ def get_tracking_summaries(cache_key: str, sku_action_pairs_json: str) -> dict:
     sku_prefixes = [p[0] for p in pairs]
     sku_action_dates = {p[0]: datetime.fromisoformat(p[1]).replace(tzinfo=timezone.utc) for p in pairs}
 
-    # "After" = last 14 days (same window for all SKUs) — 2 fast queries
+    # "After" = last 14 days (same window for all SKUs) — from BigQuery
     after_end = now - timedelta(days=lag)
     after_start = after_end - timedelta(days=14)
-    after_sold = pipelines.get_orders_count_for_skus(sku_prefixes, after_start, after_end)
-    after_returned = pipelines.get_returns_count_for_skus(sku_prefixes, after_start, after_end)
+    after_data = get_tracking_counts(
+        tuple(sku_prefixes), after_start.strftime("%Y-%m-%d"), after_end.strftime("%Y-%m-%d")
+    )
 
-    # POs for all SKUs — 1 batch query
+    # POs for all SKUs — stays on MongoDB (hiccup-ff operational data)
     po_pairs = [(sku, sku_action_dates[sku]) for sku in sku_prefixes]
     all_pos = pipelines.get_pos_for_skus(po_pairs)
 
-    # "Before" = 30 days before first PO received per SKU — 2 queries per SKU
+    # "Before" = 30 days before first PO received per SKU — from BigQuery
     results = {}
     for sku in sku_prefixes:
-        a_sold = after_sold.get(sku, 0)
-        a_ret = after_returned.get(sku, 0)
+        sku_after = after_data.get(sku, {})
+        a_sold = sku_after.get("sold", 0)
+        a_ret = sku_after.get("returned", 0)
         last_14d = min(a_ret / a_sold, 1.0) if a_sold > 0 else None
 
         pos = all_pos.get(sku, [])
@@ -62,8 +65,11 @@ def get_tracking_summaries(cache_key: str, sku_action_pairs_json: str) -> dict:
             # Before window: 30 days ending at (received - lag)
             before_end = received - timedelta(days=lag)
             before_start = before_end - timedelta(days=30)
-            b_sold = pipelines.get_orders_count_for_skus([sku], before_start, before_end).get(sku, 0)
-            b_ret = pipelines.get_returns_count_for_skus([sku], before_start, received).get(sku, 0)
+            before_data = get_tracking_counts(
+                (sku,), before_start.strftime("%Y-%m-%d"), before_end.strftime("%Y-%m-%d")
+            )
+            b_sold = before_data.get(sku, {}).get("sold", 0)
+            b_ret = before_data.get(sku, {}).get("returned", 0)
             pre_po = min(b_ret / b_sold, 1.0) if b_sold > 0 else None
 
         change_pp = None
@@ -126,12 +132,16 @@ def get_tracking_data(sku_prefix: str, action_date_str: str, days_back: int = 90
     Compute all tracking data for a single SKU.
     Vectorized rolling computation — no Python loops over dates.
     """
+    from engine.bigquery import get_tracking_daily_orders, get_tracking_daily_returns
+
     action_date = datetime.fromisoformat(action_date_str).replace(tzinfo=timezone.utc)
     now = datetime.now(timezone.utc)
     graph_start = now - timedelta(days=days_back)
 
-    daily_orders = pipelines.get_daily_orders_for_sku(sku_prefix, graph_start, now)
-    daily_returns = pipelines.get_daily_returns_for_sku(sku_prefix, graph_start, now)
+    # Graph data from BigQuery (fast, no $lookup)
+    daily_orders = get_tracking_daily_orders(sku_prefix, graph_start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"))
+    daily_returns = get_tracking_daily_returns(sku_prefix, graph_start.strftime("%Y-%m-%d"), now.strftime("%Y-%m-%d"))
+    # PO data stays on MongoDB (operational data from hiccup-ff)
     pos = pipelines.get_sku_pos(sku_prefix, action_date)
 
     df_ord = pd.DataFrame(daily_orders) if daily_orders else pd.DataFrame(columns=["date", "size", "sold"])
