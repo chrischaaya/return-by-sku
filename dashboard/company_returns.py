@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from engine.bigquery import get_filter_options, query_returns_data
+from engine.bigquery import get_filter_options, query_returns_data, get_capture_curves, get_capture_pct
 
 
 def _fmt_pct(v):
@@ -249,19 +249,65 @@ def render(actor: str):
     x_max = pd.Timestamp(end_date)
     df_grouped = df_grouped[(df_grouped["period"] >= x_min - pd.Timedelta(days=7)) & (df_grouped["period"] <= x_max)]
 
+    # Compute estimated return rates using capture curves
+    capture_curves = get_capture_curves()
+    active_channels = list(sel_channels) if sel_channels else list(capture_curves.keys())
+    today = pd.Timestamp.now(tz="UTC").normalize()
+
+    df_grouped["days_old"] = (today - df_grouped["period"]).dt.days
+    df_grouped["capture_pct"] = df_grouped["days_old"].apply(
+        lambda d: get_capture_pct(capture_curves, active_channels, d)
+    )
+    df_grouped["estimated_rate"] = (
+        df_grouped["return_rate"] / df_grouped["capture_pct"].replace(0, 1)
+    ).clip(upper=1.0)
+
+    # Split into reliable (capture >= 95%) and estimated (capture < 95%)
+    reliable_mask = df_grouped["capture_pct"] >= 0.95
+    has_estimated = (~reliable_mask).any()
+
     fig = go.Figure()
+
+    # Solid line: actual return rate
     fig.add_trace(go.Scatter(
         x=df_grouped["period"],
         y=df_grouped["return_rate"],
         mode="lines+markers+text",
+        name="Actual",
         text=[f"{v:.1%}" for v in df_grouped["return_rate"]],
         textposition="top center",
         textfont=dict(size=10, color="#2563eb"),
         line=dict(color="#2563eb", width=2.5),
         marker=dict(size=6, color="#2563eb"),
-        hovertemplate="%{x|%d %b %Y}<br>Return Rate: %{y:.1%}<br>Sold: %{customdata[0]:,}<br>Returned: %{customdata[1]:,}<extra></extra>",
-        customdata=list(zip(df_grouped["sold"].astype(int), df_grouped["returned"].astype(int))),
+        hovertemplate="%{x|%d %b %Y}<br>Actual: %{y:.1%}<br>Sold: %{customdata[0]:,}<br>Returned: %{customdata[1]:,}<br>Data captured: %{customdata[2]:.0%}<extra></extra>",
+        customdata=list(zip(
+            df_grouped["sold"].astype(int),
+            df_grouped["returned"].astype(int),
+            df_grouped["capture_pct"],
+        )),
     ))
+
+    # Dotted line: estimated return rate (only where data is incomplete)
+    if has_estimated:
+        est_df = df_grouped[~reliable_mask]
+        # Include the last reliable point for line continuity
+        last_reliable = df_grouped[reliable_mask].tail(1)
+        if not last_reliable.empty:
+            est_df = pd.concat([last_reliable, est_df])
+
+        fig.add_trace(go.Scatter(
+            x=est_df["period"],
+            y=est_df["estimated_rate"],
+            mode="lines+markers+text",
+            name="Estimated",
+            text=[f"{v:.1%}" for v in est_df["estimated_rate"]],
+            textposition="bottom center",
+            textfont=dict(size=9, color="#f59e0b"),
+            line=dict(color="#f59e0b", width=2, dash="dot"),
+            marker=dict(size=5, color="#f59e0b"),
+            hovertemplate="%{x|%d %b %Y}<br>Estimated: %{y:.1%}<br>Capture: %{customdata:.0%}<extra></extra>",
+            customdata=est_df["capture_pct"],
+        ))
 
     if granularity == "Monthly":
         tickformat = "%y-M%m"
@@ -270,13 +316,17 @@ def render(actor: str):
     else:
         tickformat = "%d %b"
 
-    y_max = max(df_grouped["return_rate"].max() + 0.05, 0.10) if not df_grouped.empty else 0.5
+    all_rates = df_grouped["return_rate"].tolist()
+    if has_estimated:
+        all_rates += df_grouped["estimated_rate"].tolist()
+    y_max = max(max(all_rates) + 0.05, 0.10) if all_rates else 0.5
     fig.update_layout(
         title="Historic Return Rate",
         yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
         xaxis=dict(title="", gridcolor="#f0f0f0", tickformat=tickformat),
         height=420, margin=dict(t=40, b=40, l=50, r=20),
         plot_bgcolor="white", hovermode="x unified",
+        legend=dict(orientation="h", y=-0.15),
     )
     st.plotly_chart(fig, use_container_width=True)
 

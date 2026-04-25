@@ -42,6 +42,78 @@ def get_filter_options() -> dict:
     return {"channels": channels, "suppliers": suppliers, "categories": categories}
 
 
+@st.cache_data(ttl=86400)
+def get_capture_curves() -> dict:
+    """
+    Compute return capture curves per channel.
+    For each channel, returns a dict of {days_since_order: cumulative_pct_captured}.
+    Based on orders 90+ days old so the full return picture is available.
+    """
+    client = _get_client()
+
+    q = """
+    WITH return_delays AS (
+      SELECT
+        o.sales_channel,
+        DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) as days_to_return
+      FROM `mongo_db.returns` r
+      JOIN `mongo_db.orders` o ON r.order_id = o.order_id
+      WHERE r.status != 'CANCELLED'
+        AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
+    ),
+    channel_totals AS (
+      SELECT sales_channel, COUNT(*) as total_returns
+      FROM return_delays
+      GROUP BY 1
+    )
+    SELECT
+      d.sales_channel,
+      d.days_to_return as day,
+      SUM(COUNT(*)) OVER (PARTITION BY d.sales_channel ORDER BY d.days_to_return) as cumulative,
+      t.total_returns
+    FROM return_delays d
+    JOIN channel_totals t ON d.sales_channel = t.sales_channel
+    GROUP BY d.sales_channel, d.days_to_return, t.total_returns
+    ORDER BY d.sales_channel, d.days_to_return
+    """
+    rows = list(client.query(q).result())
+
+    curves = {}
+    for row in rows:
+        ch = row.sales_channel
+        if ch not in curves:
+            curves[ch] = {}
+        curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
+
+    return curves
+
+
+def get_capture_pct(curves: dict, channels: list, days_old: int) -> float:
+    """
+    Get the expected capture % for a given number of days since order.
+    If multiple channels, returns weighted average (simple average for now).
+    Returns 1.0 if data is fully captured.
+    """
+    if not channels:
+        channels = list(curves.keys())
+
+    pcts = []
+    for ch in channels:
+        curve = curves.get(ch, {})
+        if not curve:
+            pcts.append(1.0)
+            continue
+        # Find the closest day <= days_old
+        matching_days = [d for d in curve.keys() if d <= days_old]
+        if matching_days:
+            pcts.append(curve[max(matching_days)])
+        else:
+            pcts.append(0.0)
+
+    return sum(pcts) / len(pcts) if pcts else 1.0
+
+
 @st.cache_data(ttl=3600)
 def query_returns_data(
     start_date: str,
