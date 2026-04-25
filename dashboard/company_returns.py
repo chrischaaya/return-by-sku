@@ -135,14 +135,11 @@ def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
 
     df = df.copy()
     df["return_rate"] = df["returned"] / df["sold"].replace(0, 1)
-    df["pct_value_return"] = df["returned_amount"] / df["gmv"].replace(0, 1)
     df = df.sort_values("sold", ascending=False).reset_index(drop=True)
 
     # Grand total
     total_sold = df["sold"].sum()
     total_returned = df["returned"].sum()
-    total_gmv = df["gmv"].sum()
-    total_ret_amt = df["returned_amount"].sum()
 
     # Pagination
     total_rows = len(df)
@@ -157,7 +154,7 @@ def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
     end = min(start + per_page, total_rows)
     page_df = df.iloc[start:end]
 
-    cols = [group_label, "Returned", "Delivered", "Return Rate", "Returned Amt", "GMV", "% Value of Return"]
+    cols = [group_label, "Returned", "Delivered", "Return Rate"]
 
     html = '<table style="width:100%; border-collapse:collapse; font-size:13px;">'
     html += '<tr style="background:#f59e0b; color:white; font-weight:600;">'
@@ -171,9 +168,6 @@ def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
         html += f'<td style="padding:5px 10px;">{_fmt_num(row["returned"])}</td>'
         html += f'<td style="padding:5px 10px;">{_fmt_num(row["sold"])}</td>'
         html += f'<td style="padding:5px 10px; font-weight:600;">{_fmt_pct(row["return_rate"])}</td>'
-        html += f'<td style="padding:5px 10px;">{_fmt_currency(row["returned_amount"])}</td>'
-        html += f'<td style="padding:5px 10px;">{_fmt_currency(row["gmv"])}</td>'
-        html += f'<td style="padding:5px 10px;">{_fmt_pct(row["pct_value_return"])}</td>'
         html += '</tr>'
 
     # Grand total row
@@ -182,9 +176,6 @@ def _build_breakdown_table(df, group_col, group_label, table_key, per_page=10):
     html += f'<td style="padding:5px 10px;">{_fmt_num(total_returned)}</td>'
     html += f'<td style="padding:5px 10px;">{_fmt_num(total_sold)}</td>'
     html += f'<td style="padding:5px 10px;">{_fmt_pct(total_returned / max(total_sold, 1))}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_currency(total_ret_amt)}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_currency(total_gmv)}</td>'
-    html += f'<td style="padding:5px 10px;">{_fmt_pct(total_ret_amt / max(total_gmv, 1))}</td>'
     html += '</tr></table>'
 
     st.markdown(html, unsafe_allow_html=True)
