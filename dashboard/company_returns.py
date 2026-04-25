@@ -304,8 +304,10 @@ def render(actor: str):
 
     # Confidence check: suppress forecast if insufficient data
     # Need at least 200 total sold in the range AND at least 50 returned
+    # No forecast on daily view or when no channel filter (total view)
     has_enough_data = total_sold >= 200 and total_returned >= 50
-    # No forecast on daily view — too noisy
+    if not sel_channels:
+        has_enough_data = False
     if granularity == "Daily":
             has_enough_data = False
     total_estimated_returned = int(df_daily["estimated_returned"].sum()) if has_enough_data else total_returned
