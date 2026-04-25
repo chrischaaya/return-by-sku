@@ -118,11 +118,19 @@ def get_capture_curves() -> dict:
     rows = list(client.query(q).result())
 
     curves = {}
+    channel_sample_sizes = {}
     for row in rows:
         ch = row.sales_channel
         if ch not in curves:
             curves[ch] = {}
+            channel_sample_sizes[ch] = row.total_returns
         curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
+
+    # Discard curves with too few data points (< 100 returns) — unreliable
+    MIN_CURVE_SAMPLES = 100
+    for ch in list(curves.keys()):
+        if channel_sample_sizes.get(ch, 0) < MIN_CURVE_SAMPLES:
+            del curves[ch]
 
     # Blended "all" curve: recent 90d, outliers excluded per channel
     q_all = f"""
