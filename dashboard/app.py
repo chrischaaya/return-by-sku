@@ -17,7 +17,7 @@ st.set_page_config(
     page_title="Return Investigation Tool",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
 )
 
 import config
@@ -119,22 +119,50 @@ st.markdown("""<style>
 [data-testid="stDateInput"] input { font-size: 13px !important; padding: 6px 10px !important; }
 </style>""", unsafe_allow_html=True)
 
-# --- Header ---
-h1, h2, h3, h4 = st.columns([5, 1, 0.5, 0.6])
-with h1:
-    st.title("Return Investigation Tool")
-    st.caption(f"Last updated: {get_cache_age()}")
-with h2:
-    should_update = st.button("Refresh Data", use_container_width=True)
-with h3:
-    show_settings = st.button("⚙️", use_container_width=True)
-with h4:
-    st.markdown(f'<div style="font-size:12px; color:#888; text-align:right; padding-top:8px;">{_actor}</div>', unsafe_allow_html=True)
+# --- Sidebar navigation ---
+with st.sidebar:
+    st.markdown(f"### Returns Tool")
+    page = st.radio(
+        "Navigate",
+        ["Return Dashboard", "SKU Return Tool"],
+        label_visibility="collapsed",
+    )
+    st.markdown("---")
+
+    # User info + logout at bottom
+    st.markdown(
+        f'<div style="position:fixed; bottom:20px; left:16px; width:240px;">'
+        f'<div style="font-size:13px; color:#555; margin-bottom:6px;">{_user_email}</div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     if st.button("Logout", key="logout_btn", use_container_width=True):
         st.logout()
         st.rerun()
 
 use_turkish = False
+
+# =====================================================================
+# PAGE: RETURN DASHBOARD (Company Returns)
+# =====================================================================
+if page == "Return Dashboard":
+    st.title("Return Dashboard")
+    render_company_returns(_actor)
+    st.stop()
+
+# =====================================================================
+# PAGE: SKU RETURN TOOL (everything below)
+# =====================================================================
+
+# --- Header ---
+h1, h2, h3 = st.columns([5, 1, 0.5])
+with h1:
+    st.title("SKU Return Tool")
+    st.caption(f"Last updated: {get_cache_age()}")
+with h2:
+    should_update = st.button("Refresh Data", use_container_width=True)
+with h3:
+    show_settings = st.button("⚙️", use_container_width=True)
 
 
 # --- Settings dialog ---
@@ -330,11 +358,10 @@ tracking_data = get_skus_by_status("tracking")
 parked_data = get_skus_by_status("no_action")
 
 # --- Tabs ---
-tab_att, tab_track, tab_park, tab_company = st.tabs([
+tab_att, tab_track, tab_park = st.tabs([
     f"Needs Attention ({len(needs_attention)})",
     f"Action Tracking ({len(tracking_data)})",
     f"Parked ({len(parked_data)})",
-    "Company Returns",
 ])
 
 
@@ -1145,13 +1172,7 @@ with tab_park:
 
 
 # =====================================================================
-# TAB 4: COMPANY RETURNS
-# =====================================================================
-with tab_company:
-    render_company_returns(_actor)
-
-# =====================================================================
-# SIDEBAR: AI CHAT
+# SIDEBAR: AI CHAT (only on SKU Return Tool page)
 # =====================================================================
 
 def _load_chat_context():
@@ -1309,8 +1330,9 @@ Answer concisely. Use the data above to give specific, actionable answers. If th
         return f"Error: {e}"
 
 
-# Sidebar chat UI
+# Sidebar chat UI (below nav, same sidebar)
 with st.sidebar:
+    st.markdown("---")
     st.markdown("### Ask about your data")
     st.caption("Ask questions about return rates, products, suppliers, or what actions to take.")
 
