@@ -13,19 +13,19 @@ from engine.bigquery import get_filter_options, query_returns_data, get_capture_
 # Per-channel reliability cutoff: official return window + 14 days buffer
 # Data older than this is considered fully reliable regardless of capture %
 CHANNEL_RELIABILITY_DAYS = {
-    "trendyol": 30,
-    "trendyolRO": 30,
-    "hepsiburada": 30,
-    "namshi": 28,
-    "hiccup": 28,
-    "debenhams": 42,
-    "fashiondays": 44,
-    "fashiondaysBG": 44,
-    "emag": 44,
-    "tiktokShop": 44,
-    "aboutYou": 114,
+    "trendyol": 22,
+    "trendyolRO": 22,
+    "hepsiburada": 22,
+    "namshi": 21,
+    "hiccup": 21,
+    "debenhams": 35,
+    "fashiondays": 37,
+    "fashiondaysBG": 37,
+    "emag": 37,
+    "tiktokShop": 37,
+    "aboutYou": 107,
 }
-DEFAULT_RELIABILITY_DAYS = 44  # fallback for unknown channels
+DEFAULT_RELIABILITY_DAYS = 37  # fallback for unknown channels
 
 
 def _get_reliability_days(channels: list) -> int:

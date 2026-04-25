@@ -11,13 +11,13 @@ from google.oauth2 import service_account
 # Per-channel max return window + 14d buffer.
 # Capture curves are capped at this — anything after is noise, not real pending returns.
 CHANNEL_MAX_RETURN_DAYS = {
-    "trendyol": 30, "trendyolRO": 30, "hepsiburada": 30,
-    "namshi": 28, "hiccup": 28,
-    "debenhams": 42,
-    "fashiondays": 44, "fashiondaysBG": 44, "emag": 44, "tiktokShop": 44,
-    "aboutYou": 114,
+    "trendyol": 22, "trendyolRO": 22, "hepsiburada": 22,
+    "namshi": 21, "hiccup": 21,
+    "debenhams": 35,
+    "fashiondays": 37, "fashiondaysBG": 37, "emag": 37, "tiktokShop": 37,
+    "aboutYou": 107,
 }
-DEFAULT_MAX_RETURN_DAYS = 44
+DEFAULT_MAX_RETURN_DAYS = 37
 
 _client = None
 
