@@ -223,7 +223,10 @@ def render(actor: str):
     # Return rate card with vs previous period inline
     rate_str = _fmt_pct(total_rate)
     if delta_str:
-        rate_html = f'{rate_str} <span style="font-size:14px; color:{delta_color}; margin-left:4px;">({delta_str})</span>'
+        prev_start_str = prev_start.strftime("%d %b")
+        prev_end_str = prev_end.strftime("%d %b %Y")
+        tooltip = f"Previous period: {prev_start_str} – {prev_end_str}&#10;Sold: {prev_sold:,} · Returned: {prev_returned:,} · Rate: {_fmt_pct(prev_rate)}"
+        rate_html = f'{rate_str} <span style="font-size:14px; color:{delta_color}; margin-left:4px; cursor:help;" title="{tooltip}">({delta_str})</span>'
     else:
         rate_html = rate_str
 
