@@ -267,46 +267,50 @@ def render(actor: str):
 
     if granularity == "Weekly":
         df_daily["period"] = df_daily["order_date"].dt.to_period("W").apply(lambda p: p.start_time)
+        df_daily["period_end"] = df_daily["period"] + pd.Timedelta(days=6)
     elif granularity == "Monthly":
         df_daily["period"] = df_daily["order_date"].dt.to_period("M").apply(lambda p: p.start_time)
+        df_daily["period_end"] = df_daily["period"] + pd.offsets.MonthEnd(0)
     else:
         df_daily["period"] = df_daily["order_date"]
+        df_daily["period_end"] = df_daily["order_date"]
 
     df_grouped = df_daily.groupby("period").agg(
         sold=("sold", "sum"), returned=("returned", "sum"),
         estimated_returned=("estimated_returned", "sum"),
         gmv=("gmv", "sum"), returned_amount=("returned_amount", "sum"),
+        period_end=("period_end", "max"),
     ).reset_index()
     df_grouped["return_rate"] = df_grouped["returned"] / df_grouped["sold"].replace(0, 1)
     df_grouped["estimated_rate"] = (df_grouped["estimated_returned"] / df_grouped["sold"].replace(0, 1)).clip(upper=1.0)
+    df_grouped = df_grouped.sort_values("period").reset_index(drop=True)
 
-    # Filter out periods that fall entirely outside the selected range
+    # Filter to selected range
     x_min = pd.Timestamp(start_date)
     x_max = pd.Timestamp(end_date)
     df_grouped = df_grouped[(df_grouped["period"] >= x_min - pd.Timedelta(days=7)) & (df_grouped["period"] <= x_max)]
 
-    # Compute per-period capture pct for the divergence check
-    # Use period END date (not start) so a week of Apr 14-20 uses age of Apr 20
-    if granularity == "Weekly":
-        df_grouped["period_end"] = df_grouped["period"] + pd.Timedelta(days=6)
-    elif granularity == "Monthly":
-        df_grouped["period_end"] = df_grouped["period"] + pd.offsets.MonthEnd(0)
+    # Explicit x-axis labels so ticks always match data points
+    if granularity == "Monthly":
+        df_grouped["label"] = df_grouped["period"].dt.strftime("%y-M%m")
+    elif granularity == "Weekly":
+        df_grouped["label"] = df_grouped["period"].dt.strftime("%d %b")
     else:
-        df_grouped["period_end"] = df_grouped["period"]
+        df_grouped["label"] = df_grouped["period"].dt.strftime("%d %b")
+
+    # Capture pct using period end date
     df_grouped["days_old"] = (today_ts - df_grouped["period_end"]).dt.days.clip(lower=0)
     df_grouped["capture_pct"] = df_grouped["days_old"].apply(
         lambda d: get_capture_pct(capture_curves, active_channels, d)
     )
 
-    # Split into reliable (capture >= 95%) and estimated (capture < 95%)
     reliable_mask = df_grouped["capture_pct"] >= 0.95
-    has_estimated = (~reliable_mask).any()
 
     fig = go.Figure()
 
     # Solid line: actual return rate
     fig.add_trace(go.Scatter(
-        x=df_grouped["period"],
+        x=df_grouped["label"],
         y=df_grouped["return_rate"],
         mode="lines+markers+text",
         name="Actual",
@@ -315,7 +319,7 @@ def render(actor: str):
         textfont=dict(size=10, color="#2563eb"),
         line=dict(color="#2563eb", width=2.5),
         marker=dict(size=6, color="#2563eb"),
-        hovertemplate="%{x|%d %b %Y}<br>Actual: %{y:.1%}<br>Sold: %{customdata[0]:,}<br>Returned: %{customdata[1]:,}<br>Data captured: %{customdata[2]:.0%}<extra></extra>",
+        hovertemplate="%{x}<br>Actual: %{y:.1%}<br>Sold: %{customdata[0]:,}<br>Returned: %{customdata[1]:,}<br>Captured: %{customdata[2]:.0%}<extra></extra>",
         customdata=list(zip(
             df_grouped["sold"].astype(int),
             df_grouped["returned"].astype(int),
@@ -324,47 +328,39 @@ def render(actor: str):
     ))
 
     # Dotted line: estimated return rate
-    # Only show where: capture < 95% AND capture >= 25% AND estimate diverges > 1pp
-    # Below 25% capture the estimate is too unreliable
+    # Only where: capture 50-95% AND estimate diverges > 1pp from actual
     est_eligible = (~reliable_mask) & (df_grouped["capture_pct"] >= 0.50)
     diverged = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
     est_show = est_eligible & diverged
 
     if est_show.any():
         est_df = df_grouped[est_show].copy()
-        # Include last point before divergence for line continuity
+        # Bridge from last reliable point for continuity
         first_est_idx = est_df.index[0]
-        if first_est_idx > 0:
-            bridge = df_grouped.loc[[first_est_idx - 1]]
-            est_df = pd.concat([bridge, est_df])
+        if first_est_idx > 0 and (first_est_idx - 1) in df_grouped.index:
+            est_df = pd.concat([df_grouped.loc[[first_est_idx - 1]], est_df])
 
         fig.add_trace(go.Scatter(
-            x=est_df["period"],
+            x=est_df["label"],
             y=est_df["estimated_rate"],
             mode="lines+markers",
             name="Estimated",
             line=dict(color="#f59e0b", width=2, dash="dot"),
             marker=dict(size=5, color="#f59e0b"),
-            hovertemplate="%{x|%d %b %Y}<br>Estimated: %{y:.1%}<br>Capture: %{customdata:.0%}<extra></extra>",
+            hovertemplate="%{x}<br>Estimated: %{y:.1%}<br>Captured: %{customdata:.0%}<extra></extra>",
             customdata=est_df["capture_pct"],
         ))
 
-    if granularity == "Monthly":
-        tickformat = "%y-M%m"
-    elif granularity == "Weekly":
-        tickformat = "%d %b"
-    else:
-        tickformat = "%d %b"
-
-    # Y-axis: use only reliable rates + eligible estimates for scaling
+    # Y-axis scaling
     all_rates = df_grouped["return_rate"].tolist()
     if est_show.any():
         all_rates += df_grouped.loc[est_show, "estimated_rate"].tolist()
     y_max = max(max(all_rates) + 0.05, 0.10) if all_rates else 0.5
+
     fig.update_layout(
         title="Historic Return Rate",
         yaxis=dict(tickformat=".0%", title="Return Rate", gridcolor="#f0f0f0", range=[0, y_max]),
-        xaxis=dict(title="", gridcolor="#f0f0f0", tickformat=tickformat),
+        xaxis=dict(title="", gridcolor="#f0f0f0", type="category"),
         height=420, margin=dict(t=40, b=40, l=50, r=20),
         plot_bgcolor="white", hovermode="x unified",
         legend=dict(orientation="h", y=-0.15),
