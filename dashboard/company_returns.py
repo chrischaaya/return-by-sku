@@ -286,7 +286,14 @@ def render(actor: str):
     df_grouped = df_grouped[(df_grouped["period"] >= x_min - pd.Timedelta(days=7)) & (df_grouped["period"] <= x_max)]
 
     # Compute per-period capture pct for the divergence check
-    df_grouped["days_old"] = (today_ts - df_grouped["period"]).dt.days
+    # Use period END date (not start) so a week of Apr 14-20 uses age of Apr 20
+    if granularity == "Weekly":
+        df_grouped["period_end"] = df_grouped["period"] + pd.Timedelta(days=6)
+    elif granularity == "Monthly":
+        df_grouped["period_end"] = df_grouped["period"] + pd.offsets.MonthEnd(0)
+    else:
+        df_grouped["period_end"] = df_grouped["period"]
+    df_grouped["days_old"] = (today_ts - df_grouped["period_end"]).dt.days.clip(lower=0)
     df_grouped["capture_pct"] = df_grouped["days_old"].apply(
         lambda d: get_capture_pct(capture_curves, active_channels, d)
     )
