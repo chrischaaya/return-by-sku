@@ -127,7 +127,7 @@ def render(actor: str):
     with r1c1:
         start_date = st.date_input(
             "From",
-            value=date.today() - timedelta(days=90),
+            value=date.today() - timedelta(days=30),
             min_value=date(2024, 1, 1),
             max_value=date.today(),
             key="cr_start",
