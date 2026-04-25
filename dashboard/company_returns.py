@@ -287,11 +287,13 @@ def render(actor: str):
         )),
     ))
 
-    # Dotted line: estimated return rate (only where data is incomplete)
+    # Dotted line: estimated return rate (only where it diverges from actual)
     if has_estimated:
-        est_df = df_grouped[~reliable_mask]
-        # Include the last reliable point for line continuity
-        last_reliable = df_grouped[reliable_mask].tail(1)
+        # Only show points where estimated differs from actual by > 1pp
+        diverged_mask = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
+        est_df = df_grouped[~reliable_mask & diverged_mask]
+        # Include the last non-diverged point for line continuity
+        last_reliable = df_grouped[reliable_mask | ~diverged_mask].tail(1)
         if not last_reliable.empty:
             est_df = pd.concat([last_reliable, est_df])
 
