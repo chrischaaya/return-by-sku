@@ -8,7 +8,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
-from engine.bigquery import get_filter_options, query_returns_data, get_capture_curves, get_capture_pct
+from engine.bigquery import get_filter_options, query_returns_data, get_capture_curves, get_capture_pct, get_channel_benchmarks
 
 # Per-channel reliability cutoff: official return window + 14 days buffer
 # Data older than this is considered fully reliable regardless of capture %
@@ -34,6 +34,67 @@ def _get_reliability_days(channels: list) -> int:
     if not channels:
         return max(CHANNEL_RELIABILITY_DAYS.values())
     return max(CHANNEL_RELIABILITY_DAYS.get(ch, DEFAULT_RELIABILITY_DAYS) for ch in channels)
+
+
+def _get_weighted_benchmark(benchmarks: dict, channels: list) -> float:
+    """Get volume-weighted historical average return rate for selected channels."""
+    if not channels or not benchmarks:
+        vals = [b["avg"] for b in benchmarks.values() if b.get("avg")]
+        return sum(vals) / len(vals) if vals else 0.25
+    avgs = [benchmarks[ch]["avg"] for ch in channels if ch in benchmarks]
+    return sum(avgs) / len(avgs) if avgs else 0.25
+
+
+def _get_benchmark_bounds(benchmarks: dict, channels: list) -> tuple:
+    """Get P5 and P95 bounds for selected channels."""
+    if not channels:
+        channels = list(benchmarks.keys())
+    p5s = [benchmarks[ch]["p5"] for ch in channels if ch in benchmarks]
+    p95s = [benchmarks[ch]["p95"] for ch in channels if ch in benchmarks]
+    p5 = min(p5s) if p5s else 0.0
+    p95 = max(p95s) if p95s else 1.0
+    return p5, p95
+
+
+def _hybrid_estimate(row, hist_avg: float, benchmarks: dict, channels: list) -> float:
+    """
+    Hybrid forecast for a single daily row:
+    - capture >= 70%: use capture curve adjustment (proven accurate)
+    - capture < 50%: use historical benchmark
+    - 50-70%: blend both methods
+    Then apply guardrails (P95 cap, max 2x inflation).
+    """
+    actual = row["returned"]
+    sold = row["sold"]
+    capture = row["capture_pct"]
+
+    if sold == 0 or capture >= 0.95:
+        return actual
+
+    # Strategy 1: capture curve adjustment
+    curve_estimate = actual / capture if capture > 0 else actual
+
+    # Strategy 2: historical benchmark
+    hist_estimate = sold * hist_avg
+
+    # Blend based on capture level
+    if capture >= 0.70:
+        estimated = curve_estimate
+    elif capture < 0.50:
+        estimated = hist_estimate
+    else:
+        # Linear blend between 50% and 70%
+        blend = (capture - 0.50) / 0.20
+        estimated = blend * curve_estimate + (1 - blend) * hist_estimate
+
+    # Guardrails
+    _, p95 = _get_benchmark_bounds(benchmarks, channels)
+    max_by_p95 = sold * min(p95 * 1.1, 1.0)  # P95 + 10% tolerance
+    max_by_inflation = actual * 2.5  # Never inflate more than 2.5x
+    estimated = min(estimated, max_by_p95, max_by_inflation)
+    estimated = max(estimated, actual)  # Never less than actual
+
+    return estimated
 
 
 def _fmt_pct(v):
@@ -214,24 +275,33 @@ def render(actor: str):
     total_returned = int(df_daily["returned"].sum())
     total_rate = total_returned / max(total_sold, 1)
 
-    # Compute estimated overall rate using capture curves
+    # Compute estimated overall rate using hybrid forecast
     capture_curves = get_capture_curves()
+    benchmarks = get_channel_benchmarks()
     active_channels = list(sel_channels) if sel_channels else list(capture_curves.keys())
     today_ts = pd.Timestamp.now().normalize()
+
+    # Historical benchmark for the active channels (weighted average)
+    hist_avg = _get_weighted_benchmark(benchmarks, active_channels)
 
     df_daily["order_date"] = pd.to_datetime(df_daily["order_date"])
     df_daily["days_old"] = (today_ts - df_daily["order_date"]).dt.days
     df_daily["capture_pct"] = df_daily["days_old"].apply(
         lambda d: get_capture_pct(capture_curves, active_channels, d)
     )
-    # Estimated returned = actual returned adjusted by capture curve
-    # Only adjust where capture >= 70%, otherwise use actual (too unreliable to inflate)
+
+    # Hybrid forecast per daily row
     df_daily["estimated_returned"] = df_daily.apply(
-        lambda r: r["returned"] / r["capture_pct"] if r["capture_pct"] >= 0.70 else r["returned"],
+        lambda r: _hybrid_estimate(r, hist_avg, benchmarks, active_channels),
         axis=1,
     )
-    total_estimated_returned = int(df_daily["estimated_returned"].sum())
+
+    # Confidence check: suppress forecast if insufficient data
+    # Need at least 200 total sold in the range AND at least 50 returned
+    has_enough_data = total_sold >= 200 and total_returned >= 50
+    total_estimated_returned = int(df_daily["estimated_returned"].sum()) if has_enough_data else total_returned
     estimated_rate = total_estimated_returned / max(total_sold, 1)
+    show_forecast = has_enough_data and abs(estimated_rate - total_rate) > 0.005
 
     # Previous period comparison
     period_days = (end_date - start_date).days
@@ -273,10 +343,13 @@ def render(actor: str):
     else:
         rate_html = rate_str
 
-    # Estimated rate card
-    est_rate_str = _fmt_pct(estimated_rate)
+    # KPI cards
+    if show_forecast:
+        est_rate_str = _fmt_pct(estimated_rate)
+        k1, k2, k3, k4 = st.columns(4)
+    else:
+        k1, k2, k3 = st.columns(3)
 
-    k1, k2, k3, k4 = st.columns(4)
     for col, label, value in [
         (k1, "Total Sold", _fmt_num(total_sold)),
         (k2, "Total Returned", _fmt_num(total_returned)),
@@ -297,14 +370,15 @@ def render(actor: str):
             f'</div>',
             unsafe_allow_html=True,
         )
-    with k4:
-        st.markdown(
-            f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
-            f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Estimated Return Rate</div>'
-            f'<div style="font-size:28px; font-weight:700; margin-top:4px; color:#f59e0b;">{est_rate_str}</div>'
-            f'</div>',
-            unsafe_allow_html=True,
-        )
+    if show_forecast:
+        with k4:
+            st.markdown(
+                f'<div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:16px; text-align:center;">'
+                f'<div style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:0.5px;">Estimated Return Rate</div>'
+                f'<div style="font-size:28px; font-weight:700; margin-top:4px; color:#f59e0b;">{est_rate_str}</div>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
 
     st.markdown('<div style="height:16px;"></div>', unsafe_allow_html=True)
 
@@ -382,8 +456,9 @@ def render(actor: str):
     ))
 
     # Dotted line: estimated return rate
-    # Only where: capture 50-95% AND estimate diverges > 1pp from actual
-    est_eligible = (~reliable_mask) & (df_grouped["capture_pct"] >= 0.70)
+    # Only show if: forecast is enabled, period is not reliable, estimate diverges > 1pp,
+    # AND the period has enough data (>= 50 sold)
+    est_eligible = show_forecast & (~reliable_mask) & (df_grouped["sold"] >= 50)
     diverged = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
     est_show = est_eligible & diverged
 

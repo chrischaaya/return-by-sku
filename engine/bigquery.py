@@ -140,17 +140,71 @@ def get_capture_curves() -> dict:
 
 @st.cache_data(ttl=86400)
 def get_channel_volumes() -> dict:
-    """Get return volume per channel for weighting capture curves."""
+    """Get return volume per channel for weighting capture curves. Same recent window as curves."""
     client = _get_client()
     q = """
     SELECT o.sales_channel, COUNT(*) as returns
     FROM `mongo_db.returns` r
     JOIN `mongo_db.orders` o ON r.order_id = o.order_id
     WHERE r.status != 'CANCELLED'
-      AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+      AND DATE(o.creation_date) BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
+                                    AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
     GROUP BY 1
     """
     return {row.sales_channel: row.returns for row in client.query(q).result()}
+
+
+@st.cache_data(ttl=86400)
+def get_channel_benchmarks() -> dict:
+    """
+    Historical return rate benchmarks per channel.
+    Returns {channel: {avg, p5, p95, min_weekly_sold}} from recent 90d mature data.
+    Used for: forecast validation guardrails + historical rate fallback.
+    """
+    client = _get_client()
+    q = """
+    WITH weekly_rates AS (
+      SELECT
+        o.sales_channel,
+        DATE_TRUNC(o.order_date, WEEK(MONDAY)) as week,
+        SUM(o.sold) as sold,
+        COALESCE(SUM(r.returned), 0) as returned
+      FROM (
+        SELECT order_date, sku_prefix, size, sales_channel, SUM(sold) as sold
+        FROM `returns_analytics.daily_orders`
+        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
+                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        GROUP BY 1, 2, 3, 4
+      ) o
+      LEFT JOIN (
+        SELECT order_date, sku_prefix, size, sales_channel, SUM(returned) as returned
+        FROM `returns_analytics.daily_returns`
+        WHERE order_date BETWEEN DATE_SUB(CURRENT_DATE(), INTERVAL 120 DAY)
+                              AND DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+        GROUP BY 1, 2, 3, 4
+      ) r ON o.order_date = r.order_date AND o.sku_prefix = r.sku_prefix
+         AND o.size = r.size AND o.sales_channel = r.sales_channel
+      GROUP BY 1, 2
+      HAVING sold >= 20
+    )
+    SELECT
+      sales_channel,
+      ROUND(AVG(returned / sold), 4) as avg_rate,
+      ROUND(APPROX_QUANTILES(returned / sold, 100)[OFFSET(5)], 4) as p5,
+      ROUND(APPROX_QUANTILES(returned / sold, 100)[OFFSET(95)], 4) as p95,
+      MIN(sold) as min_weekly_sold
+    FROM weekly_rates
+    GROUP BY 1
+    """
+    return {
+        row.sales_channel: {
+            "avg": row.avg_rate,
+            "p5": row.p5,
+            "p95": row.p95,
+            "min_weekly_sold": row.min_weekly_sold,
+        }
+        for row in client.query(q).result()
+    }
 
 
 def _lookup_curve(curve: dict, days_old: int) -> float:
