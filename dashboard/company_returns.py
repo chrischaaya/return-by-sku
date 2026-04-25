@@ -319,7 +319,7 @@ def render(actor: str):
     # Dotted line: estimated return rate
     # Only show where: capture < 95% AND capture >= 25% AND estimate diverges > 1pp
     # Below 25% capture the estimate is too unreliable
-    est_eligible = (~reliable_mask) & (df_grouped["capture_pct"] >= 0.25)
+    est_eligible = (~reliable_mask) & (df_grouped["capture_pct"] >= 0.50)
     diverged = (df_grouped["estimated_rate"] - df_grouped["return_rate"]).abs() > 0.01
     est_show = est_eligible & diverged
 

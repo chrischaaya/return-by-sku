@@ -45,12 +45,13 @@ def get_filter_options() -> dict:
 @st.cache_data(ttl=86400)
 def get_capture_curves() -> dict:
     """
-    Compute return capture curves per channel.
-    For each channel, returns a dict of {days_since_order: cumulative_pct_captured}.
+    Compute return capture curves: per-channel AND a volume-weighted 'all' curve.
+    For each key, returns a dict of {days_since_order: cumulative_pct_captured}.
     Based on orders 90+ days old so the full return picture is available.
     """
     client = _get_client()
 
+    # Per-channel curves
     q = """
     WITH return_delays AS (
       SELECT
@@ -86,32 +87,54 @@ def get_capture_curves() -> dict:
             curves[ch] = {}
         curves[ch][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
 
+    # Blended "all" curve — volume-weighted across all channels
+    q_all = """
+    WITH return_delays AS (
+      SELECT
+        DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) as days_to_return
+      FROM `mongo_db.returns` r
+      JOIN `mongo_db.orders` o ON r.order_id = o.order_id
+      WHERE r.status != 'CANCELLED'
+        AND DATE(o.creation_date) BETWEEN '2025-01-01' AND DATE_SUB(CURRENT_DATE(), INTERVAL 90 DAY)
+        AND DATE_DIFF(DATE(r.creation_date), DATE(o.creation_date), DAY) >= 0
+    ),
+    total AS (SELECT COUNT(*) as t FROM return_delays)
+    SELECT
+      days_to_return as day,
+      SUM(COUNT(*)) OVER (ORDER BY days_to_return) as cumulative,
+      MAX(t.t) as total_returns
+    FROM return_delays
+    CROSS JOIN total t
+    GROUP BY days_to_return, t.t
+    ORDER BY days_to_return
+    """
+    all_rows = list(client.query(q_all).result())
+    curves["_all"] = {}
+    for row in all_rows:
+        curves["_all"][row.day] = row.cumulative / row.total_returns if row.total_returns > 0 else 1.0
+
     return curves
+
+
+def _lookup_curve(curve: dict, days_old: int) -> float:
+    """Look up cumulative capture % from a curve dict."""
+    if not curve:
+        return 1.0
+    matching = [d for d in curve.keys() if d <= days_old]
+    return curve[max(matching)] if matching else 0.0
 
 
 def get_capture_pct(curves: dict, channels: list, days_old: int) -> float:
     """
     Get the expected capture % for a given number of days since order.
-    If multiple channels, returns weighted average (simple average for now).
-    Returns 1.0 if data is fully captured.
+    Uses channel-specific curve if exactly one channel selected,
+    otherwise uses the volume-weighted blended curve.
     """
-    if not channels:
-        channels = list(curves.keys())
+    if len(channels) == 1 and channels[0] in curves:
+        return _lookup_curve(curves[channels[0]], days_old)
 
-    pcts = []
-    for ch in channels:
-        curve = curves.get(ch, {})
-        if not curve:
-            pcts.append(1.0)
-            continue
-        # Find the closest day <= days_old
-        matching_days = [d for d in curve.keys() if d <= days_old]
-        if matching_days:
-            pcts.append(curve[max(matching_days)])
-        else:
-            pcts.append(0.0)
-
-    return sum(pcts) / len(pcts) if pcts else 1.0
+    # Multiple or no channels: use the blended curve
+    return _lookup_curve(curves.get("_all", {}), days_old)
 
 
 @st.cache_data(ttl=3600)
