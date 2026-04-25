@@ -54,11 +54,22 @@ def get_filter_options() -> dict:
         "SELECT DISTINCT category_l3 FROM `returns_analytics.products` WHERE category_l3 IS NOT NULL ORDER BY category_l3"
     ).result()]
 
-    subcategories = [r.category_l4 for r in client.query(
-        "SELECT DISTINCT category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l4"
-    ).result()]
+    # Category → subcategory mapping
+    cat_sub_map = {}
+    all_subcategories = set()
+    for r in client.query(
+        "SELECT DISTINCT category_l3, category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l3, category_l4"
+    ).result():
+        cat_sub_map.setdefault(r.category_l3, []).append(r.category_l4)
+        all_subcategories.add(r.category_l4)
 
-    return {"channels": channels, "suppliers": suppliers, "categories": categories, "subcategories": subcategories}
+    return {
+        "channels": channels,
+        "suppliers": suppliers,
+        "categories": categories,
+        "subcategories": sorted(all_subcategories),
+        "cat_sub_map": cat_sub_map,
+    }
 
 
 @st.cache_data(ttl=86400)
