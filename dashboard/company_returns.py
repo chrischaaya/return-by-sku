@@ -225,8 +225,10 @@ def render(actor: str):
         lambda d: get_capture_pct(capture_curves, active_channels, d)
     )
     # Estimated returned = actual returned adjusted by capture curve
-    df_daily["estimated_returned"] = (
-        df_daily["returned"] / df_daily["capture_pct"].replace(0, 1)
+    # Only adjust where capture >= 70%, otherwise use actual (too unreliable to inflate)
+    df_daily["estimated_returned"] = df_daily.apply(
+        lambda r: r["returned"] / r["capture_pct"] if r["capture_pct"] >= 0.70 else r["returned"],
+        axis=1,
     )
     total_estimated_returned = int(df_daily["estimated_returned"].sum())
     estimated_rate = total_estimated_returned / max(total_sold, 1)
