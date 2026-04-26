@@ -410,7 +410,7 @@ def query_returns_data(
         p.supplier_name,
         p.category_l3
       FROM `returns_analytics.daily_orders` o
-      LEFT JOIN `returns_analytics.products` p ON LEFT(o.sku_prefix, 8) = p.family_sku
+      LEFT JOIN `returns_analytics.products` p ON o.sku_prefix = p.sku_prefix
       WHERE {where_clause}
     ),
     filtered_returns AS (
@@ -422,7 +422,7 @@ def query_returns_data(
         r.returned,
         r.returned_amount
       FROM `returns_analytics.daily_returns` r
-      LEFT JOIN `returns_analytics.products` rp ON LEFT(r.sku_prefix, 8) = rp.family_sku
+      LEFT JOIN `returns_analytics.products` rp ON r.sku_prefix = rp.sku_prefix
       LEFT JOIN `returns_analytics.daily_orders` o ON r.order_date = o.order_date
         AND r.sku_prefix = o.sku_prefix AND r.size = o.size AND r.sales_channel = o.sales_channel
       WHERE {where_clause.replace('o.', 'r.').replace('p.', 'rp.')}
