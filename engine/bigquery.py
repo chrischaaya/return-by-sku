@@ -54,23 +54,7 @@ def get_filter_options() -> dict:
         "SELECT DISTINCT category_l3 FROM `returns_analytics.products` WHERE category_l3 IS NOT NULL ORDER BY category_l3"
     ).result()]
 
-    # Category → subcategory pairs (flat list for cache compatibility)
-    try:
-        cat_sub_pairs = [
-            (r.category_l3, r.category_l4)
-            for r in client.query(
-                "SELECT DISTINCT category_l3, category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l3, category_l4"
-            ).result()
-        ]
-    except Exception:
-        cat_sub_pairs = []
-
-    return {
-        "channels": channels,
-        "suppliers": suppliers,
-        "categories": categories,
-        "cat_sub_pairs": cat_sub_pairs,
-    }
+    return {"channels": channels, "suppliers": suppliers, "categories": categories}
 
 
 @st.cache_data(ttl=86400)
@@ -353,7 +337,6 @@ def query_returns_data(
     channels: tuple = (),
     suppliers: tuple = (),
     categories: tuple = (),
-    subcategories: tuple = (),
     sku_prefixes: tuple = (),
 ) -> dict:
     """
@@ -380,11 +363,6 @@ def query_returns_data(
     if categories:
         filters.append("p.category_l3 IN UNNEST(@categories)")
         params.append(bigquery.ArrayQueryParameter("categories", "STRING", list(categories)))
-
-    # subcategory filter disabled until returns_analytics.products table has category_l4 column
-    # if subcategories:
-    #     filters.append("p.category_l4 IN UNNEST(@subcategories)")
-    #     params.append(bigquery.ArrayQueryParameter("subcategories", "STRING", list(subcategories)))
 
     if sku_prefixes:
         sku_conditions = []

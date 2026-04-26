@@ -237,7 +237,7 @@ def render(actor: str):
         granularity = st.selectbox("Granularity", ["Daily", "Weekly", "Monthly"], index=0, key="cr_gran")
 
     # Row 2: filters
-    r2c1, r2c2, r2c3, r2c4, r2c5 = st.columns([1, 1, 1, 1, 1])
+    r2c1, r2c2, r2c3, r2c4 = st.columns([1, 1, 1, 1])
     with r2c1:
         sel_channels = st.multiselect("Channel", options["channels"], key="cr_ch")
     with r2c2:
@@ -245,14 +245,6 @@ def render(actor: str):
     with r2c3:
         sel_categories = st.multiselect("Category", options["categories"], key="cr_cat")
     with r2c4:
-        # Filter subcategories based on selected categories
-        pairs = options.get("cat_sub_pairs", [])
-        if sel_categories:
-            available_subs = sorted(set(sub for cat, sub in pairs if cat in sel_categories))
-        else:
-            available_subs = sorted(set(sub for _, sub in pairs))
-        sel_subcategories = st.multiselect("Subcategory", available_subs, key="cr_subcat")
-    with r2c5:
         sku_input = st.text_input("SKU Prefix", placeholder="e.g. MBAJ1ZFU01", key="cr_sku")
 
     # Parse SKU input (comma-separated)
@@ -266,7 +258,6 @@ def render(actor: str):
             channels=tuple(sel_channels),
             suppliers=tuple(sel_suppliers),
             categories=tuple(sel_categories),
-            subcategories=tuple(sel_subcategories),
             sku_prefixes=sku_prefixes,
         )
 
