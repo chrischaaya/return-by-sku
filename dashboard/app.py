@@ -146,12 +146,15 @@ use_turkish = False
 # =====================================================================
 if page == "Return Dashboard":
     st.title("Return Dashboard")
-    render_company_returns(_actor)
+    with st.spinner("Loading Return Dashboard..."):
+        render_company_returns(_actor)
     st.stop()
 
 # =====================================================================
 # PAGE: SKU RETURN TOOL (everything below)
 # =====================================================================
+if page != "SKU Return Tool":
+    st.stop()
 
 # --- Header ---
 h1, h2, h3 = st.columns([5, 1, 0.5])
