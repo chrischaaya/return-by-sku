@@ -55,12 +55,15 @@ def get_filter_options() -> dict:
     ).result()]
 
     # Category → subcategory pairs (flat list for cache compatibility)
-    cat_sub_pairs = [
-        (r.category_l3, r.category_l4)
-        for r in client.query(
-            "SELECT DISTINCT category_l3, category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l3, category_l4"
-        ).result()
-    ]
+    try:
+        cat_sub_pairs = [
+            (r.category_l3, r.category_l4)
+            for r in client.query(
+                "SELECT DISTINCT category_l3, category_l4 FROM `returns_analytics.products` WHERE category_l4 IS NOT NULL ORDER BY category_l3, category_l4"
+            ).result()
+        ]
+    except Exception:
+        cat_sub_pairs = []
 
     return {
         "channels": channels,
@@ -378,9 +381,10 @@ def query_returns_data(
         filters.append("p.category_l3 IN UNNEST(@categories)")
         params.append(bigquery.ArrayQueryParameter("categories", "STRING", list(categories)))
 
-    if subcategories:
-        filters.append("p.category_l4 IN UNNEST(@subcategories)")
-        params.append(bigquery.ArrayQueryParameter("subcategories", "STRING", list(subcategories)))
+    # subcategory filter disabled until returns_analytics.products table has category_l4 column
+    # if subcategories:
+    #     filters.append("p.category_l4 IN UNNEST(@subcategories)")
+    #     params.append(bigquery.ArrayQueryParameter("subcategories", "STRING", list(subcategories)))
 
     if sku_prefixes:
         sku_conditions = []
@@ -404,8 +408,7 @@ def query_returns_data(
         o.sold,
         o.gmv,
         p.supplier_name,
-        p.category_l3,
-        p.category_l4
+        p.category_l3
       FROM `returns_analytics.daily_orders` o
       LEFT JOIN `returns_analytics.products` p ON LEFT(o.sku_prefix, 8) = p.family_sku
       WHERE {where_clause}
