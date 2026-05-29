@@ -11,6 +11,17 @@ import streamlit as st
 _write_client = None
 
 
+def data_version() -> int:
+    """Per-session counter bumped on every write. Used as a cache key so that
+    cached reads (status lists, excluded SKUs, POs) refresh immediately after
+    the acting user makes a change, while other sessions pick it up via TTL."""
+    return st.session_state.get("_data_version", 0)
+
+
+def _bump_version():
+    st.session_state["_data_version"] = st.session_state.get("_data_version", 0) + 1
+
+
 def _get_write_db():
     global _write_client
     if _write_client is None:
@@ -78,6 +89,7 @@ def save_action(sku_prefix: str, action_summary: str, overall_rate: float, actor
             update,
             upsert=True,
         )
+        _bump_version()
     except Exception as e:
         st.error(f"Failed to save action for {sku_prefix}: {e}")
 
@@ -103,6 +115,7 @@ def add_new_action(sku_prefix: str, action_summary: str, overall_rate: float, ac
                 "$push": {"actions": action_entry},
             },
         )
+        _bump_version()
     except Exception as e:
         st.error(f"Failed to add action for {sku_prefix}: {e}")
 
@@ -136,6 +149,7 @@ def save_no_action(sku_prefix: str, actor: str):
             update,
             upsert=True,
         )
+        _bump_version()
     except Exception as e:
         st.error(f"Failed to save no-action for {sku_prefix}: {e}")
 
@@ -162,6 +176,7 @@ def resolve_sku(sku_prefix: str, actor: str):
                 },
             },
         )
+        _bump_version()
     except Exception as e:
         st.error(f"Failed to resolve {sku_prefix}: {e}")
 
@@ -188,6 +203,7 @@ def revert_action(sku_prefix: str, actor: str):
                 },
             },
         )
+        _bump_version()
     except Exception as e:
         st.error(f"Failed to revert {sku_prefix}: {e}")
 
@@ -206,6 +222,11 @@ def get_all_actions() -> dict:
 
 
 def get_excluded_skus() -> set:
+    return _cached_excluded_skus(data_version())
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_excluded_skus(version: int) -> set:
     return {
         doc["skuPrefix"] for doc in _coll().find(
             {"status": {"$in": ["tracking", "no_action"]}},
@@ -215,6 +236,11 @@ def get_excluded_skus() -> set:
 
 
 def get_skus_by_status(status: str) -> dict:
+    return _cached_skus_by_status(status, data_version())
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def _cached_skus_by_status(status: str, version: int) -> dict:
     results = {}
     for doc in _coll().find({"status": status}):
         results[doc["skuPrefix"]] = doc

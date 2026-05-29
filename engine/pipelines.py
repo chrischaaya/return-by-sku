@@ -11,8 +11,12 @@ KEY DESIGN DECISIONS:
 
 from datetime import datetime, timedelta, timezone
 
+import streamlit as st
+
 import config
 from engine.connection import get_db
+
+_cache_data = st.cache_data
 
 _hiccup_sku_prefixes = None
 
@@ -446,13 +450,8 @@ def get_trendyol_review_stats() -> list:
     Fetch Trendyol review stats (rating + count) per skuPrefix from scripts.TrendyolReviewStats.
     Uses hiccupStats for Hiccup's own listings. Falls back to merchantStats.
     """
-    from pymongo import MongoClient
-    import streamlit as st
-
-    uri = st.secrets.get("MONGO_URI")
-    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
     try:
-        db = client["scripts"]
+        db = get_db().client["scripts"]
         pipeline = [
             {"$project": {
                 "_id": 0,
@@ -477,8 +476,6 @@ def get_trendyol_review_stats() -> list:
         return list(db["TrendyolReviewStats"].aggregate(pipeline))
     except Exception:
         return []
-    finally:
-        client.close()
 
 
 def get_orders_count_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> dict:
@@ -518,19 +515,28 @@ def get_pos_for_skus(sku_action_pairs: list) -> dict:
     Batch: get POs for multiple SKUs in one query to hiccup-ff.
     sku_action_pairs: [(sku_prefix, action_date), ...]
     Returns {sku_prefix: [{created_on, received_on, items}, ...]}.
-    """
-    from pymongo import MongoClient
-    import streamlit as st
 
+    Result is cached per tracked-SKU set + data version so repeated reruns
+    (e.g. typing in a search box) don't re-query hiccup-ff.
+    """
     if not sku_action_pairs:
         return {}
+    import streamlit as st
+    from engine.actions import data_version
 
-    uri = st.secrets.get("MONGO_FF_URI", st.secrets.get("MONGO_URI"))
-    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
+    pairs_key = tuple(sorted((p[0], p[1].isoformat() if hasattr(p[1], "isoformat") else str(p[1])) for p in sku_action_pairs))
+    return _get_pos_for_skus_cached(pairs_key, data_version())
+
+
+@_cache_data(ttl=300, show_spinner=False)
+def _get_pos_for_skus_cached(pairs_key: tuple, version: int) -> dict:
+    from engine.connection import get_ff_db
+
+    pairs = [(p[0], datetime.fromisoformat(p[1])) for p in pairs_key]
     try:
-        db = client["hiccup-ff"]
-        sku_prefixes = [p[0] for p in sku_action_pairs]
-        earliest = min(p[1] for p in sku_action_pairs)
+        db = get_ff_db()
+        sku_prefixes = [p[0] for p in pairs]
+        earliest = min(p[1] for p in pairs)
         pipeline = [
             {"$match": {"skuPrefix": {"$in": sku_prefixes}, "createdOn": {"$gt": earliest}, "warehouseTransactionDate": {"$exists": True, "$ne": None}, "status": {"$nin": ["ORDER_CANCELLED"]}}},
             {"$sort": {"warehouseTransactionDate": 1}},
@@ -541,14 +547,12 @@ def get_pos_for_skus(sku_action_pairs: list) -> dict:
         for doc in db["SupplierProductOrders"].aggregate(pipeline):
             sku = doc.pop("skuPrefix")
             # Only keep POs created after this SKU's action date
-            action_date = next((p[1] for p in sku_action_pairs if p[0] == sku), earliest)
+            action_date = next((p[1] for p in pairs if p[0] == sku), earliest)
             if doc["created_on"] > action_date:
                 results.setdefault(sku, []).append(doc)
         return results
     except Exception:
         return {}
-    finally:
-        client.close()
 
 
 def get_daily_orders_for_skus(sku_prefixes: list, start_date: datetime, end_date: datetime) -> list:
@@ -753,13 +757,10 @@ def get_sku_pos(sku_prefix: str, after_date: datetime) -> list:
     that have been received at the warehouse.
     Returns [{created_on, received_on, items: [{size, ordered, received}]}, ...]
     """
-    from pymongo import MongoClient
-    import streamlit as st
+    from engine.connection import get_ff_db
 
-    uri = st.secrets.get("MONGO_FF_URI", st.secrets.get("MONGO_URI"))
-    client = MongoClient(uri, serverSelectionTimeoutMS=10000)
     try:
-        db = client["hiccup-ff"]
+        db = get_ff_db()
         pipeline = [
             {
                 "$match": {
@@ -792,6 +793,4 @@ def get_sku_pos(sku_prefix: str, after_date: datetime) -> list:
         return list(db["SupplierProductOrders"].aggregate(pipeline))
     except Exception:
         return []
-    finally:
-        client.close()
 
